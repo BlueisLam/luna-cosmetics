@@ -1,6 +1,10 @@
 [build]
-  command = "node build.js"
+  command = "node scripts/fetch-data.js && node build.js"
   publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
 
 [build.environment]
   NODE_VERSION = "20"
@@ -15,6 +19,12 @@
   for = "/assets/*"
   [headers.values]
     Cache-Control = "public, max-age=3600"
+
+[[headers]]
+  for = "/admin/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "no-cache"
 
 [[headers]]
   for = "/*"

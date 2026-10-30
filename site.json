@@ -16,7 +16,16 @@
     "codDepositFrom": 1000000,
     "codDepositRate": 0.3,
     "codMax": 5000000,
-    "bank": { "name": "Vietcombank", "bin": "970436", "acc": "0000000000", "holder": "LUNA COSMETICS" },
-    "blockedPhones": ["0900000001", "0900000002"]
-  }
+    "bank": {
+      "name": "Vietcombank",
+      "bin": "970436",
+      "acc": "0000000000",
+      "holder": "LUNA COSMETICS"
+    }
+  },
+  "supabase": {
+    "url": "https://aawhgpfmbkjytjuuygwa.supabase.co",
+    "anonKey": "sb_publishable_M4o70it4x_NbAcD-3Jd3Og_Lb_KYlAG"
+  },
+  "_ghichu": "supabase.url và supabase.anonKey: lấy ở Supabase → Project Settings → API. Phí ship, cọc COD… khi đã nối Supabase thì sửa trên trang admin (mục Cài đặt), số trong file này chỉ dùng khi chưa nối."
 }

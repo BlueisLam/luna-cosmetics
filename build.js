@@ -6,7 +6,11 @@ const path = require("path");
 const ROOT = __dirname;
 const OUT = path.join(ROOT, "dist");
 const SITE = JSON.parse(fs.readFileSync(path.join(ROOT, "site.json"), "utf8"));
-const P = JSON.parse(fs.readFileSync(path.join(ROOT, "data/products.json"), "utf8"));
+const CACHE = path.join(ROOT, ".cache");
+const fromDB = fs.existsSync(path.join(CACHE, "products.json"));
+const P = JSON.parse(fs.readFileSync(fromDB ? path.join(CACHE, "products.json") : path.join(ROOT, "data/products.json"), "utf8"));
+if (fs.existsSync(path.join(CACHE, "settings.json"))) Object.assign(SITE.order, JSON.parse(fs.readFileSync(path.join(CACHE, "settings.json"), "utf8")));
+const SB = { url: (process.env.SUPABASE_URL || SITE.supabase?.url || "").replace(/\/$/, ""), anonKey: process.env.SUPABASE_ANON_KEY || SITE.supabase?.anonKey || "" };
 const T = JSON.parse(fs.readFileSync(path.join(ROOT, "data/taxonomy.json"), "utf8"));
 const BASE = SITE.url.replace(/\/$/, "");
 const TODAY = new Date().toISOString().slice(0, 10);
@@ -413,7 +417,7 @@ write("/404.html", layout({ title: "Không tìm thấy trang", desc: "Trang khô
 fs.mkdirSync(path.join(OUT, "assets"), { recursive: true });
 const pub = P.map(p => ({ id: p.id, cat: p.cat, sub: p.sub, brand: p.brand, origin: p.origin, name: p.name, vol: p.vol, price: p.price, sale: p.sale || 0,
   isNew: !!p.isNew, pop: p.pop, actives: p.actives, skin: p.skin, concerns: p.concerns, url: p.url, img: p.images[0] || "", shape: p.shape, tint: p.tint, inStock: p.inStock }));
-const cfg = { ...SITE.order, zalo: SITE.zalo, shopName: SITE.name };
+const cfg = { ...SITE.order, zalo: SITE.zalo, shopName: SITE.name, supabase: SB.url && SB.anonKey ? SB : null };
 fs.writeFileSync(path.join(OUT, "assets/data.js"),
   `window.LUNA=${JSON.stringify({ products: pub, cfg, needs: T.needs.map(n => ({ name: n.name, hint: n.hint })), art: ACCENT })};`);
 for (const f of fs.readdirSync(path.join(ROOT, "assets"))) fs.copyFileSync(path.join(ROOT, "assets", f), path.join(OUT, "assets", f));
@@ -425,6 +429,14 @@ fs.writeFileSync(path.join(OUT, "sitemap.xml"), `<?xml version="1.0" encoding="U
 ${pages.map(p => `  <url><loc>${BASE}${p.url}</loc><lastmod>${TODAY}</lastmod><priority>${p.priority.toFixed(1)}</priority></url>`).join("\n")}
 </urlset>
 `);
-fs.writeFileSync(path.join(OUT, "robots.txt"), `User-agent: *\nAllow: /\nDisallow: /thanh-toan/\n\nSitemap: ${BASE}/sitemap.xml\n`);
+fs.writeFileSync(path.join(OUT, "robots.txt"), `User-agent: *\nAllow: /\nDisallow: /thanh-toan/\nDisallow: /admin/\n\nSitemap: ${BASE}/sitemap.xml\n`);
 
+/* Trang admin */
+fs.mkdirSync(path.join(OUT, "admin"), { recursive: true });
+fs.writeFileSync(path.join(OUT, "admin/index.html"), fs.readFileSync(path.join(ROOT, "admin/index.html"), "utf8")
+  .replace("__ADMIN_CONFIG__", JSON.stringify({ supabase: SB.url && SB.anonKey ? SB : null, site: SITE.url, taxonomy: { needs: T.needs.map(n => n.name), subs: Object.keys(T.subs) } }).replace(/</g, "\\u003c")));
+fs.copyFileSync(path.join(ROOT, "admin/admin.js"), path.join(OUT, "admin/admin.js"));
+fs.copyFileSync(path.join(ROOT, "admin/admin.css"), path.join(OUT, "admin/admin.css"));
+
+console.log(`• Nguồn sản phẩm: ${fromDB ? "Supabase" : "data/products.json"}`);
 console.log(`✓ Đã tạo ${pages.length} trang (+ thanh toán, 404) vào dist/ — ${P.length} sản phẩm, ${BRANDS.length} thương hiệu, ${ACTIVES.length} hoạt chất`);

@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>Luna Admin</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant:wght@600&family=Be+Vietnam+Pro:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body class="admin">
+
+<section id="setup" class="center" hidden>
+  <div class="panel narrow">
+    <h1 class="display">Chưa nối Supabase</h1>
+    <p>Điền <code>supabase.url</code> và <code>supabase.anonKey</code> trong file <code>site.json</code> rồi đẩy lên GitHub. Xem hướng dẫn trong README, mục “Cài đặt Supabase”.</p>
+  </div>
+</section>
+
+<section id="login" class="center" hidden>
+  <form class="panel narrow" id="loginForm" novalidate>
+    <p class="logo">Luna <i>Admin</i></p>
+    <label class="f" for="lEmail">Email<input id="lEmail" type="email" autocomplete="username" required></label>
+    <label class="f" for="lPass">Mật khẩu<input id="lPass" type="password" autocomplete="current-password" required></label>
+    <p class="err" id="lErr" role="alert"></p>
+    <button class="btn" type="submit" id="lBtn">Đăng nhập</button>
+  </form>
+</section>
+
+<div id="app" hidden>
+  <header class="a-head">
+    <div class="wrap a-bar">
+      <a class="logo" href="/" target="_blank" rel="noopener">Luna <i>Admin</i></a>
+      <div class="a-user"><span id="who"></span><button class="linkish" id="logout" type="button">Đăng xuất</button></div>
+    </div>
+    <nav class="wrap a-tabs" aria-label="Mục quản lý">
+      <button type="button" data-view="orders" aria-current="page">Đơn hàng <b id="newCount" hidden></b></button>
+      <button type="button" data-view="products">Sản phẩm</button>
+      <button type="button" data-view="blocked">Chặn COD</button>
+      <button type="button" data-view="settings">Cài đặt</button>
+    </nav>
+  </header>
+
+  <div class="wrap">
+    <div class="rebuild" id="rebuild" hidden>
+      <span>Có thay đổi sản phẩm hoặc cài đặt. Bấm cập nhật để khách thấy trên web.</span>
+      <button class="btn" type="button" id="rebuildBtn">Cập nhật web</button>
+    </div>
+
+    <section id="v-orders" class="view">
+      <div class="a-toolbar">
+        <input id="oSearch" type="search" placeholder="Tìm mã đơn, tên, số điện thoại…" aria-label="Tìm đơn">
+        <button class="btn ghost" type="button" id="oReload">Tải lại</button>
+      </div>
+      <div class="chips" id="oStatus"></div>
+      <div id="oList" class="o-list"></div>
+    </section>
+
+    <section id="v-products" class="view" hidden>
+      <div class="a-toolbar">
+        <input id="pSearch" type="search" placeholder="Tìm tên, thương hiệu…" aria-label="Tìm sản phẩm">
+        <button class="btn" type="button" id="pNew">Thêm sản phẩm</button>
+      </div>
+      <p class="result" id="pCount"></p>
+      <div id="pList" class="p-list"></div>
+    </section>
+
+    <section id="v-blocked" class="view" hidden>
+      <form class="panel" id="bForm" novalidate>
+        <legend>Chặn COD cho số điện thoại</legend>
+        <div class="two">
+          <label class="f" for="bPhone">Số điện thoại<input id="bPhone" inputmode="tel" placeholder="0912345678" required></label>
+          <label class="f" for="bNote">Ghi chú<input id="bNote" placeholder="Bom đơn ngày…"></label>
+        </div>
+        <p class="err" id="bErr" role="alert"></p>
+        <button class="btn" type="submit">Thêm vào danh sách chặn</button>
+      </form>
+      <p class="result" id="bCount"></p>
+      <div id="bList" class="b-list"></div>
+    </section>
+
+    <section id="v-settings" class="view" hidden>
+      <form class="panel" id="sForm" novalidate>
+        <legend>Phí và quy tắc COD</legend>
+        <div class="two">
+          <label class="f" for="sShip">Phí giao hàng COD (đ)<input id="sShip" type="number" min="0" step="1000"></label>
+          <label class="f" for="sFee">Phí thu hộ COD (đ)<input id="sFee" type="number" min="0" step="1000"></label>
+          <label class="f" for="sFrom">COD phải cọc từ (đ)<input id="sFrom" type="number" min="0" step="10000"></label>
+          <label class="f" for="sRate">Tỷ lệ cọc (%)<input id="sRate" type="number" min="0" max="100" step="5"></label>
+          <label class="f" for="sMax">Đơn trên mức này chỉ nhận chuyển khoản (đ)<input id="sMax" type="number" min="0" step="100000"></label>
+        </div>
+        <p class="hint">Chuyển khoản trước luôn miễn phí giao hàng. Đổi xong nhớ bấm “Cập nhật web” để chữ trên web khớp số mới. Quy tắc tính tiền áp dụng ngay.</p>
+        <p class="err" id="sErr" role="alert"></p>
+        <button class="btn" type="submit">Lưu cài đặt</button>
+      </form>
+    </section>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer editor" id="editor" aria-label="Sửa sản phẩm">
+  <div class="dh"><h2 id="eTitle">Sản phẩm</h2><button class="x" type="button" id="eClose" aria-label="Đóng">×</button></div>
+  <form class="db" id="eForm" novalidate></form>
+  <div class="df">
+    <p class="err" id="eErr" role="alert"></p>
+    <div class="e-actions"><button class="btn" type="submit" form="eForm" id="eSave">Lưu sản phẩm</button><button class="btn ghost" type="button" id="eDel">Xoá</button></div>
+    <div id="eDelConfirm" class="confirm" hidden>Xoá vĩnh viễn sản phẩm này? Nếu chỉ muốn tạm ngừng bán, hãy tắt “Hiện trên web”.
+      <div class="e-actions"><button class="btn danger" type="button" id="eDelYes">Xoá vĩnh viễn</button><button class="btn ghost" type="button" id="eDelNo">Không xoá</button></div></div>
+  </div>
+</aside>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>window.ADMIN = __ADMIN_CONFIG__;</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="/admin/admin.js"></script>
+</body>
+</html>

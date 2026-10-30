@@ -3,8 +3,8 @@
   "private": true,
   "description": "Web bán skincare & makeup Luna Cosmetics",
   "scripts": {
-    "build": "node build.js",
-    "dev": "node build.js && npx --yes serve dist"
+    "build": "node scripts/fetch-data.js && node build.js",
+    "dev": "node scripts/fetch-data.js && node build.js && npx --yes serve dist"
   },
   "engines": { "node": ">=18" }
 }

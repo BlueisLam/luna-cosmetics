@@ -1,67 +1,84 @@
 # Luna Cosmetics
 
-Web bán skincare & makeup cao cấp. Web tĩnh nhiều trang, chuẩn SEO, deploy trên Netlify.
+Web bán skincare & makeup cao cấp. Web tĩnh nhiều trang chuẩn SEO trên Netlify, đơn hàng và sản phẩm lưu trên Supabase, quản lý tại `/admin/`.
+
+## Cài đặt Supabase (làm 1 lần)
+
+### 1. Tạo bảng và nạp sản phẩm mẫu
+Supabase → **SQL Editor** → **New query**:
+1. Dán toàn bộ `supabase/schema.sql` → **Run**.
+2. Tạo query mới, dán `supabase/seed.sql` → **Run** (22 sản phẩm mẫu, sửa/xoá sau trên admin).
+
+### 2. Tạo tài khoản admin
+1. **Authentication → Users → Add user → Create new user**: nhập email + mật khẩu, tick **Auto Confirm User**.
+2. SQL Editor, chạy (thay email của bạn):
+   ```sql
+   insert into public.admins (user_id) select id from auth.users where email = 'email-cua-ban@gmail.com';
+   ```
+3. **Authentication → Sign In / Providers**: tắt **Allow new users to sign up** để người lạ không tự tạo tài khoản.
+
+Trang admin: `https://<web>/admin/`
+
+### 3. Nút "Cập nhật web" trên admin
+Sửa sản phẩm trên admin xong, web cần build lại để khách thấy.
+1. Netlify → **Site configuration → Build & deploy → Build hooks → Add build hook**, tên `Admin`, nhánh `main` → copy link.
+2. Netlify → **Site configuration → Environment variables → Add**: `BUILD_HOOK_URL` = link vừa copy.
+3. **Deploys → Trigger deploy → Deploy site** một lần để áp dụng.
+
+### 4. Báo đơn mới qua Telegram (không bắt buộc)
+Trang admin đang mở sẽ tự báo đơn mới (có tiếng). Muốn nhận cả khi không mở admin:
+1. Telegram: nhắn **@BotFather** → `/newbot` → lấy **token**.
+2. Nhắn một tin bất kỳ cho bot vừa tạo, rồi mở `https://api.telegram.org/bot<TOKEN>/getUpdates` → tìm `"chat":{"id":...}` → đó là **chat id**.
+3. Netlify → Environment variables, thêm:
+   - `TELEGRAM_BOT_TOKEN` = token
+   - `TELEGRAM_CHAT_ID` = chat id
+   - `WEBHOOK_SECRET` = một chuỗi ngẫu nhiên tự đặt (ví dụ `luna-8f3k2m9x`)
+4. Supabase → **Database → Webhooks → Create a new hook**: bảng `orders`, sự kiện **Insert**, loại **HTTP Request**, method **POST**, URL `https://<web>/.netlify/functions/order-webhook`, thêm header `x-webhook-secret` = chuỗi ở bước 3.
+5. Trigger deploy lại trên Netlify.
+
+## Trang admin làm được gì
+
+- **Đơn hàng**: lọc theo trạng thái, tìm theo mã/tên/SĐT, đổi trạng thái, đánh dấu đã nhận tiền/cọc, nhắn Zalo, gọi, ghi chú nội bộ. Bấm **Bom hàng** để chặn COD số đó ngay.
+- **Sản phẩm**: thêm, sửa, tải ảnh, bật sale, hàng mới về, hết hàng, ẩn/hiện.
+- **Chặn COD**: thêm/bỏ số điện thoại bị chặn. Khách bị chặn vẫn đặt được nếu chuyển khoản trước.
+- **Cài đặt**: phí ship COD, phí thu hộ, mức cọc, mức tối đa nhận COD.
+
+Trạng thái đơn: Chờ thanh toán (chuyển khoản, hoặc COD cần cọc) → Chờ xác nhận (COD) → Đã xác nhận → Đang giao → Hoàn thành / Bom hàng / Đã huỷ.
+
+## Bảo mật
+
+- Giá, phí ship, tiền cọc được tính lại trên Supabase (`place_order`), khách sửa giá trên trình duyệt cũng không có tác dụng.
+- Khách không đọc được đơn của người khác, cũng không xem được danh sách số bị chặn.
+- Mỗi số điện thoại tối đa 5 đơn trong 10 phút để chống spam.
+- Khoá `publishable`/`anon` trong `site.json` được phép công khai. **Không bao giờ** đưa khoá `secret`/`service_role` vào code.
 
 ## Cấu trúc
 
 | File / thư mục | Dùng để |
 |---|---|
-| `site.json` | Thông tin shop: tên miền, hotline, Zalo, số tài khoản, quy tắc COD, danh sách số chặn COD |
-| `data/products.json` | Danh sách sản phẩm |
-| `data/taxonomy.json` | Mô tả danh mục, nhu cầu da, hoạt chất, nội dung các trang chính sách |
-| `assets/` | Giao diện (`style.css`) và xử lý giỏ hàng, bộ lọc, thanh toán (`app.js`) |
-| `public/` | File tĩnh copy thẳng ra web (favicon, ảnh sản phẩm…) |
+| `site.json` | Thông tin shop, tên miền, Zalo, **số tài khoản ngân hàng**, khoá Supabase |
+| `supabase/` | `schema.sql` (bảng, bảo mật, hàm đặt hàng), `seed.sql` (sản phẩm mẫu) |
+| `admin/` | Trang quản lý |
+| `netlify/functions/` | `rebuild` (nút Cập nhật web), `order-webhook` (báo Telegram) |
+| `data/products.json` | Sản phẩm dự phòng khi chưa nối Supabase |
+| `data/taxonomy.json` | Mô tả danh mục, nhu cầu da, hoạt chất, nội dung trang chính sách |
+| `assets/` | Giao diện và giỏ hàng, bộ lọc, thanh toán |
+| `scripts/fetch-data.js` | Lấy sản phẩm từ Supabase lúc build |
 | `build.js` | Tạo toàn bộ trang vào `dist/` |
 
-## Các trang được tạo
+## Số tài khoản và mã QR
 
-- Trang chủ, `/cua-hang/` (bộ lọc đầy đủ, tìm kiếm)
-- Danh mục: `/skincare/`, `/makeup/` và danh mục con như `/skincare/serum/`
-- Nhu cầu da: `/nhu-cau/mun/`, `/nhu-cau/tham-sang-da/`…
-- Thương hiệu: `/thuong-hieu/<tên>/` · Hoạt chất: `/hoat-chat/niacinamide/`…
-- Bộ sưu tập: `/hang-moi-ve/`, `/ban-chay/`, `/khuyen-mai/`
-- Mỗi sản phẩm một trang: `/san-pham/<tên-sản-phẩm-thương-hiệu>/`
-- Thanh toán `/thanh-toan/`, chính sách `/chinh-sach/...`, `/lien-he/`, `404`
-- `sitemap.xml`, `robots.txt`, dữ liệu sản phẩm cho Google (Product schema, breadcrumb)
+Điền vào `site.json` → `order.bank`: tên ngân hàng, `bin` (mã ngân hàng), số tài khoản, tên chủ tài khoản. Mã BIN thường gặp: Vietcombank `970436`, Techcombank `970407`, MB `970422`, ACB `970416`, VPBank `970432`, BIDV `970418`, VietinBank `970415`, TPBank `970423`.
 
-## Thêm / sửa sản phẩm
+## Khi mua tên miền
 
-Mở `data/products.json`, thêm một mục:
-
-```json
-{"id":23,"cat":"skincare","sub":"Serum","brand":"Tên hãng","origin":"Hàn","name":"Tên sản phẩm","vol":"30ml",
- "price":990000,"sale":850000,"isNew":true,
- "actives":["Niacinamide"],"skin":["Da dầu"],"concerns":["Thâm & sáng da"],"pop":7,
- "images":["/images/ten-san-pham-1.jpg"],
- "desc":"Mô tả ngắn, tự viết.","howto":"Cách dùng.","ingredients":"Bảng thành phần (không bắt buộc)",
- "shape":"dropper","tint":"#f2e6d6"}
-```
-
-- `id`: số không trùng. `cat`: `skincare` hoặc `makeup`.
-- `sale`: bỏ đi nếu không giảm giá. `isNew`: bỏ đi khi hết là hàng mới.
-- `concerns` phải dùng đúng tên trong `taxonomy.json`: Mụn, Thâm & sáng da, Lão hoá, Cấp ẩm, Nhạy cảm, Lỗ chân lông.
-- `pop`: 1–10, càng cao càng được xếp lên đầu. Từ 9 trở lên hiện ở mục Bán chạy.
-- `inStock: false` khi hết hàng.
-- **Ảnh**: bỏ ảnh vào `public/images/`, ghi đường dẫn vào `images`. Chưa có ảnh thì web dùng hình minh hoạ tạm, nhưng Google Mua sắm bắt buộc phải có ảnh thật.
-
-Đẩy lên GitHub là Netlify tự build lại trong khoảng 1 phút.
+1. Sửa `"url"` trong `site.json`, đẩy lên GitHub.
+2. Netlify → Domain management → Add domain, làm theo hướng dẫn trỏ DNS.
+3. Supabase → Authentication → URL Configuration: đổi Site URL sang tên miền mới.
+4. Google Search Console → gửi `https://<tên-miền>/sitemap.xml`. Google Merchant Center để hiện ở tab Mua sắm.
 
 ## Chạy thử trên máy
 
 ```bash
-npm run dev     # build rồi mở http://localhost:3000
+npm run dev
 ```
-
-## Khi mua tên miền
-
-1. Sửa `"url"` trong `site.json` thành tên miền mới (ví dụ `https://lunacosmetics.vn`), đẩy lên GitHub.
-2. Netlify → Domain management → Add domain, làm theo hướng dẫn trỏ DNS. Netlify tự cấp HTTPS.
-3. Google Search Console → thêm tên miền → gửi `https://<tên-miền>/sitemap.xml`.
-4. Google Merchant Center → đăng ký, nối với Search Console để hiện sản phẩm ở tab Mua sắm.
-
-## Việc của Giai đoạn 2
-
-- Đơn hàng hiện chỉ lưu trên trình duyệt khách. Cần nối Supabase để shop nhận đơn.
-- Danh sách số chặn COD đang nằm trong `site.json` (ai xem mã nguồn cũng thấy). Sẽ chuyển vào Supabase.
-- Trang quản lý sản phẩm, đơn hàng; báo đơn mới qua Telegram/email.
-- Điền số tài khoản thật và mã BIN ngân hàng vào `site.json` để mã QR VietQR quét được (Vietcombank `970436`, Techcombank `970407`, MB `970422`, ACB `970416`…).

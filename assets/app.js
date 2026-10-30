@@ -8,7 +8,22 @@
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const norm = s => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d");
   const normPhone = s => (s || "").replace(/[\s.\-]/g, "").replace(/^\+84/, "0");
-  const isBlocked = s => (CFG.blockedPhones || []).map(normPhone).includes(normPhone(s));
+  const SB = CFG.supabase;
+  const rpc = async (fn, body) => {
+    const r = await fetch(`${SB.url}/rest/v1/rpc/${fn}`, { method: "POST", headers: { apikey: SB.anonKey, ...(SB.anonKey.startsWith("eyJ") ? { Authorization: `Bearer ${SB.anonKey}` } : {}), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await r.json().catch(() => null);
+    if (!r.ok) throw new Error((data && data.message) || `HTTP ${r.status}`);
+    return data;
+  };
+  // Số bị chặn COD được kiểm tra trên server, danh sách không lộ ra web
+  const blocked = {};
+  const isBlocked = s => blocked[normPhone(s)] === true;
+  async function checkPhone(phone) {
+    const p = normPhone(phone);
+    if (!SB || !/^0(3|5|7|8|9)\d{8}$/.test(p) || p in blocked) return;
+    try { blocked[p] = !(await rpc("cod_allowed", { p_phone: p })); } catch (e) { return; }
+    if (blocked[p] && checkoutEl && !lastOrder) { readForm(); if (form.method === "cod") form.method = "bank"; renderCheckout(); }
+  }
 
   function thumb(p) {
     if (p.img) return `<img src="${esc(p.img)}" alt="">`;
@@ -221,7 +236,17 @@
       </aside>
     </div>`;
   }
-  function placeOrder() {
+  let sending = false;
+  const ERR = {
+    COD_BLOCKED: "Số điện thoại này chưa áp dụng COD, vui lòng chọn chuyển khoản.",
+    COD_OVER_MAX: `Đơn trên ${vnd(CFG.codMax)} chỉ nhận chuyển khoản.`,
+    BAD_PHONE: "Số điện thoại chưa đúng (ví dụ 0912345678).",
+    BAD_NAME: "Vui lòng nhập họ tên.", BAD_ADDRESS: "Vui lòng nhập địa chỉ đầy đủ.",
+    EMPTY_CART: "Giỏ hàng đang trống.",
+    TOO_MANY: "Bạn vừa đặt nhiều đơn liên tiếp. Vui lòng đợi vài phút hoặc nhắn Zalo shop.",
+  };
+  async function placeOrder() {
+    if (sending) return;
     readForm();
     const err = [];
     if (form.name.length < 2) err.push("Vui lòng nhập họ tên.");
@@ -229,12 +254,34 @@
     if (form.addr.length < 6) err.push("Vui lòng nhập địa chỉ đầy đủ.");
     if (form.method === "cod" && (isBlocked(form.phone) || subtotal() > CFG.codMax)) { form.method = "bank"; renderCheckout(); $("fErr").textContent = "Đơn này chỉ nhận chuyển khoản, đã chuyển sang hình thức chuyển khoản."; return; }
     if (err.length) { $("fErr").textContent = err.join(" "); return; }
+    const items = Object.entries(cart).map(([id, n]) => ({ id: +id, qty: n }));
+    const buyer = { name: form.name, phone: form.phone, addr: form.addr, city: form.city, note: form.note };
+    if (SB) {
+      const btn = document.querySelector("#ckForm button[type=submit]");
+      sending = true; btn.disabled = true; btn.textContent = "Đang gửi đơn…"; $("fErr").textContent = "";
+      try {
+        const r = await rpc("place_order", { p_items: items, p_method: form.method, p_name: form.name, p_phone: form.phone, p_address: form.addr, p_city: form.city, p_note: form.note });
+        lastOrder = { ...r, buyer, at: new Date().toISOString() };
+      } catch (e) {
+        sending = false;
+        const m = e.message || "";
+        if (m === "COD_BLOCKED") blocked[normPhone(form.phone)] = true;
+        if (m === "COD_BLOCKED" || m === "COD_OVER_MAX") form.method = "bank";
+        renderCheckout();
+        $("fErr").textContent = m.startsWith("OUT_OF_STOCK:") ? `“${m.slice(13)}” vừa hết hàng, vui lòng bỏ khỏi giỏ.`
+          : m.startsWith("PRODUCT_NOT_FOUND") ? "Có sản phẩm trong giỏ không còn bán, vui lòng tải lại trang."
+          : ERR[m] || `Chưa gửi được đơn. Kiểm tra mạng rồi thử lại, hoặc nhắn Zalo ${CFG.zalo}.`;
+        return;
+      }
+      sending = false;
+    } else {
     const q = quote(form.method);
     lastOrder = { code: "LUNA" + Date.now().toString().slice(-6), at: new Date().toISOString(), method: form.method, ...q,
       items: Object.entries(cart).map(([id, n]) => ({ id: +id, name: byId(id).name, qty: n, price: priceOf(byId(id)) })),
       buyer: { name: form.name, phone: form.phone, addr: form.addr, city: form.city, note: form.note } };
-    // Giai đoạn 2: gửi đơn về Supabase. Tạm thời lưu trên máy khách.
+    // Chưa nối Supabase: chế độ chạy thử, đơn chỉ lưu trên máy này
     const orders = store.get("luna-orders", []); orders.push(lastOrder); store.set("luna-orders", orders);
+    }
     cart = {}; store.set("luna-cart", cart); renderBag();
     renderDone(); window.scrollTo(0, 0);
   }
@@ -296,7 +343,7 @@
     if (shopEl && t.dataset.f) { t.checked ? S.sel[t.dataset.f].add(t.value) : S.sel[t.dataset.f].delete(t.value); renderShop(); }
     if (shopEl && t.id === "sort") { S.sort = t.value; renderShop(); }
     if (checkoutEl && t.name === "pm") { readForm(); form.method = t.value; renderCheckout(); }
-    if (checkoutEl && t.id === "fPhone") { readForm(); if (isBlocked(form.phone) && form.method === "cod") form.method = "bank"; renderCheckout(); }
+    if (checkoutEl && t.id === "fPhone") { readForm(); if (isBlocked(form.phone) && form.method === "cod") form.method = "bank"; renderCheckout(); checkPhone(form.phone); }
   });
   document.addEventListener("toggle", e => { const g = e.target.dataset && e.target.dataset.g; if (g) e.target.open ? S.open.add(g) : S.open.delete(g); }, true);
   document.addEventListener("submit", e => { if (e.target.id === "ckForm") { e.preventDefault(); placeOrder(); } });
@@ -309,5 +356,5 @@
     qi.closest("form").addEventListener("submit", e => { e.preventDefault(); S.q = qi.value.trim(); renderShop(); });
     qi.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { S.q = qi.value.trim(); renderShop(); }, 150); });
   }
-  if (checkoutEl) renderCheckout();
+  if (checkoutEl) { renderCheckout(); checkPhone(form.phone); }
 })();
