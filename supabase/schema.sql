@@ -137,7 +137,8 @@ declare
   v_phone text := regexp_replace(regexp_replace(coalesce(p_phone,''), '[\s.\-]', '', 'g'), '^\+84', '0');
   v_items jsonb := '[]'::jsonb;
   v_sub int := 0; v_ship int := 0; v_fee int := 0; v_total int; v_dep int := 0;
-  r record; pr public.products; v_qty int; v_code text; i int := 0;
+  r record; pr public.products; inv record; v_qty int; v_cost int; v_code text; i int := 0;
+  v_moves jsonb := '[]'::jsonb; v_oid bigint;
 begin
   if p_method not in ('bank','cod') then raise exception 'BAD_METHOD'; end if;
   if v_phone !~ '^0(3|5|7|8|9)[0-9]{8}$' then raise exception 'BAD_PHONE'; end if;
@@ -153,9 +154,17 @@ begin
     if not found then raise exception 'PRODUCT_NOT_FOUND:%', r.id; end if;
     if not pr.in_stock then raise exception 'OUT_OF_STOCK:%', pr.name; end if;
     if coalesce(r.qty,0) < 1 or r.qty > 20 then raise exception 'BAD_QTY'; end if;
-    v_qty := r.qty;
+    v_qty := r.qty; v_cost := 0;
+    -- Sản phẩm có quản lý kho: khoá dòng để 2 khách đặt cùng lúc không bán quá số tồn
+    select * into inv from public.inventory where product_id = pr.id for update;
+    if found then
+      if inv.stock < v_qty then raise exception 'OUT_OF_STOCK:%', pr.name; end if;
+      update public.inventory set stock = stock - v_qty, updated_at = now() where product_id = pr.id;
+      v_cost := inv.cost;
+      v_moves := v_moves || jsonb_build_object('id', pr.id, 'qty', v_qty);
+    end if;
     v_sub := v_sub + coalesce(pr.sale, pr.price) * v_qty;
-    v_items := v_items || jsonb_build_object('id', pr.id, 'name', pr.name, 'brand', pr.brand, 'vol', pr.vol, 'price', coalesce(pr.sale, pr.price), 'qty', v_qty);
+    v_items := v_items || jsonb_build_object('id', pr.id, 'name', pr.name, 'brand', pr.brand, 'vol', pr.vol, 'price', coalesce(pr.sale, pr.price), 'qty', v_qty, 'cost', v_cost);
   end loop;
 
   select * into s from public.shop_settings where id = 1;
@@ -177,9 +186,15 @@ begin
 
   insert into public.orders (code, status, method, items, subtotal, ship, fee, total, deposit, buyer_name, phone, address, city, note)
   values (v_code, case when p_method = 'bank' or v_dep > 0 then 'cho_thanh_toan' else 'cho_xac_nhan' end, p_method, v_items,
-          v_sub, v_ship, v_fee, v_total, v_dep, left(trim(p_name),120), v_phone, left(trim(p_address),300), left(coalesce(p_city,''),80), left(coalesce(p_note,''),300));
+          v_sub, v_ship, v_fee, v_total, v_dep, left(trim(p_name),120), v_phone, left(trim(p_address),300), left(coalesce(p_city,''),80), left(coalesce(p_note,''),300))
+  returning id into v_oid;
 
-  return jsonb_build_object('code', v_code, 'method', p_method, 'subtotal', v_sub, 'ship', v_ship, 'fee', v_fee, 'total', v_total, 'deposit', v_dep, 'items', v_items);
+  insert into public.stock_moves (product_id, order_id, qty, kind, note)
+  select (m->>'id')::bigint, v_oid, -(m->>'qty')::int, 'ban', 'Đơn ' || v_code from jsonb_array_elements(v_moves) m;
+
+  -- giá vốn không bao giờ trả về cho khách
+  return jsonb_build_object('code', v_code, 'method', p_method, 'subtotal', v_sub, 'ship', v_ship, 'fee', v_fee, 'total', v_total, 'deposit', v_dep,
+    'items', (select jsonb_agg(e - 'cost') from jsonb_array_elements(v_items) e));
 end $$;
 
 revoke all on function public.place_order(jsonb,text,text,text,text,text,text) from public;
@@ -251,7 +266,7 @@ begin
   return jsonb_build_object(
     'code', o.code, 'created_at', o.created_at,
     'status', case when o.status = 'bom_hang' then 'da_huy' else o.status end,
-    'method', o.method, 'paid', o.paid, 'items', o.items,
+    'method', o.method, 'paid', o.paid, 'items', (select coalesce(jsonb_agg(e - 'cost'), '[]'::jsonb) from jsonb_array_elements(o.items) e),
     'subtotal', o.subtotal, 'ship', o.ship, 'fee', o.fee, 'total', o.total, 'deposit', o.deposit,
     'buyer_name', o.buyer_name, 'address', o.address, 'city', o.city,
     'carrier', o.carrier, 'tracking_code', o.tracking_code,
@@ -261,6 +276,163 @@ begin
 end $$;
 revoke all on function public.track_order(text,text) from public;
 grant execute on function public.track_order(text,text) to anon, authenticated;
+
+-- =====================================================================
+-- GIAI ĐOẠN 4: quản lý kho & thống kê
+-- Sản phẩm CHƯA có dòng trong bảng inventory = không quản lý kho (bán thoải mái như trước).
+-- Nhập hàng lần đầu trên admin là sản phẩm bắt đầu được quản lý kho.
+-- =====================================================================
+create table if not exists public.inventory (
+  product_id bigint primary key references public.products(id) on delete cascade,
+  sku text not null default '',
+  stock int not null default 0,
+  cost int not null default 0 check (cost >= 0),        -- giá vốn bình quân
+  low_stock int not null default 3 check (low_stock >= 0), -- báo sắp hết khi tồn <= mức này
+  updated_at timestamptz not null default now()
+);
+alter table public.inventory enable row level security;
+drop policy if exists "admin quản lý kho" on public.inventory;
+create policy "admin quản lý kho" on public.inventory for all using (public.is_admin()) with check (public.is_admin());
+
+create table if not exists public.stock_moves (
+  id bigint generated by default as identity primary key,
+  product_id bigint not null references public.products(id) on delete cascade,
+  order_id bigint references public.orders(id) on delete set null,
+  qty int not null,                 -- dương: vào kho, âm: ra kho
+  kind text not null check (kind in ('nhap','ban','huy_don','tra','hong','kiem_ke')),
+  unit_cost int,
+  note text not null default '',
+  stock_after int,
+  created_by uuid default auth.uid(),
+  created_at timestamptz not null default now()
+);
+create index if not exists stock_moves_product_idx on public.stock_moves (product_id, created_at desc);
+create index if not exists stock_moves_order_idx on public.stock_moves (order_id);
+alter table public.stock_moves enable row level security;
+drop policy if exists "admin xem nhập xuất" on public.stock_moves;
+create policy "admin xem nhập xuất" on public.stock_moves for select using (public.is_admin());
+
+-- Ghi số tồn sau mỗi lần nhập/xuất
+create or replace function public.stock_after_fill() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.stock_after is null then select stock into new.stock_after from public.inventory where product_id = new.product_id; end if;
+  return new;
+end $$;
+drop trigger if exists stock_moves_after on public.stock_moves;
+create trigger stock_moves_after before insert on public.stock_moves for each row execute function public.stock_after_fill();
+
+-- Tồn kho về 0 → tự báo "Hết hàng" trên web; nhập thêm → tự mở bán lại
+create or replace function public.sync_in_stock() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  update public.products set in_stock = (new.stock > 0) where id = new.product_id and in_stock is distinct from (new.stock > 0);
+  return new;
+end $$;
+drop trigger if exists inventory_sync on public.inventory;
+create trigger inventory_sync after insert or update of stock on public.inventory for each row execute function public.sync_in_stock();
+
+-- Huỷ / bom hàng → hoàn lại kho. Mở lại đơn đã huỷ → trừ kho lại.
+create or replace function public.restock_on_cancel() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare r record; dead text[] := array['da_huy','bom_hang'];
+begin
+  if not (old.status = any(dead)) and new.status = any(dead) then
+    for r in select product_id, -sum(qty)::int as out_qty from public.stock_moves where order_id = new.id group by product_id having -sum(qty) > 0 loop
+      update public.inventory set stock = stock + r.out_qty, updated_at = now() where product_id = r.product_id;
+      if found then
+        insert into public.stock_moves (product_id, order_id, qty, kind, note)
+        values (r.product_id, new.id, r.out_qty, 'huy_don', 'Hoàn kho: đơn ' || new.code || case when new.status = 'bom_hang' then ' (bom hàng)' else ' (huỷ)' end);
+      end if;
+    end loop;
+  elsif old.status = any(dead) and not (new.status = any(dead)) then
+    for r in select (e->>'id')::bigint as product_id, sum((e->>'qty')::int)::int as qty from jsonb_array_elements(new.items) e group by 1 loop
+      update public.inventory set stock = stock - r.qty, updated_at = now() where product_id = r.product_id;
+      if found then
+        insert into public.stock_moves (product_id, order_id, qty, kind, note) values (r.product_id, new.id, -r.qty, 'ban', 'Mở lại đơn ' || new.code);
+      end if;
+    end loop;
+  end if;
+  return new;
+end $$;
+drop trigger if exists orders_restock on public.orders;
+create trigger orders_restock after update of status on public.orders for each row execute function public.restock_on_cancel();
+
+-- Admin: nhập hàng / khách trả / hàng hỏng / kiểm kê
+create or replace function public.adjust_stock(p_product_id bigint, p_kind text, p_qty int, p_unit_cost int default null, p_note text default '')
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare inv public.inventory; v_delta int; v_cost int;
+begin
+  if not public.is_admin() then raise exception 'FORBIDDEN'; end if;
+  if p_kind not in ('nhap','tra','hong','kiem_ke') then raise exception 'BAD_KIND'; end if;
+  if p_qty is null or p_qty < 0 or (p_kind <> 'kiem_ke' and p_qty = 0) or p_qty > 100000 then raise exception 'BAD_QTY'; end if;
+  if p_unit_cost is not null and p_unit_cost < 0 then raise exception 'BAD_COST'; end if;
+  if not exists (select 1 from public.products where id = p_product_id) then raise exception 'PRODUCT_NOT_FOUND'; end if;
+
+  insert into public.inventory (product_id) values (p_product_id) on conflict (product_id) do nothing;
+  select * into inv from public.inventory where product_id = p_product_id for update;
+
+  v_delta := case p_kind when 'nhap' then p_qty when 'tra' then p_qty when 'hong' then -p_qty else p_qty - inv.stock end;
+  v_cost := inv.cost;
+  if p_kind = 'nhap' and p_unit_cost is not null then
+    v_cost := case when greatest(inv.stock, 0) + p_qty > 0
+                   then round((greatest(inv.stock, 0)::numeric * inv.cost + p_qty::numeric * p_unit_cost) / (greatest(inv.stock, 0) + p_qty))::int
+                   else p_unit_cost end;
+  end if;
+
+  update public.inventory set stock = stock + v_delta, cost = v_cost, updated_at = now() where product_id = p_product_id returning * into inv;
+  insert into public.stock_moves (product_id, qty, kind, unit_cost, note) values (p_product_id, v_delta, p_kind, p_unit_cost, left(coalesce(p_note,''), 300));
+  return to_jsonb(inv);
+end $$;
+revoke all on function public.adjust_stock(bigint,text,int,int,text) from public;
+grant execute on function public.adjust_stock(bigint,text,int,int,text) to authenticated;
+
+-- Admin: thống kê theo khoảng thời gian (doanh thu = tiền hàng, không tính ship/phí thu hộ)
+create or replace function public.admin_stats(p_from timestamptz, p_to timestamptz) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare res jsonb;
+begin
+  if not public.is_admin() then raise exception 'FORBIDDEN'; end if;
+  with o as (select * from public.orders where created_at >= p_from and created_at < p_to),
+  -- doanh thu: chỉ đơn đã xác nhận / đang giao / hoàn thành. Đơn chờ thanh toán/xác nhận tính riêng.
+  v as (select * from o where status in ('da_xac_nhan','dang_giao','hoan_thanh')),
+  pe as (select * from o where status in ('cho_thanh_toan','cho_xac_nhan')),
+  it as (
+    select (e->>'id')::bigint as id, e->>'name' as name, (e->>'qty')::int as qty, (e->>'price')::int as price,
+           nullif((e->>'cost')::int, 0) as cost, v.id as oid
+    from v, jsonb_array_elements(v.items) e
+  ),
+  itc as (select it.*, coalesce(it.cost, nullif(inv.cost, 0)) as unit_cost from it left join public.inventory inv on inv.product_id = it.id)
+  select jsonb_build_object(
+    'orders', (select count(*) from o),
+    'valid_orders', (select count(*) from v),
+    'revenue', coalesce((select sum(subtotal) from v), 0),
+    'completed_revenue', coalesce((select sum(subtotal) from v where status = 'hoan_thanh'), 0),
+    'pending_orders', (select count(*) from pe),
+    'pending_revenue', coalesce((select sum(subtotal) from pe), 0),
+    'cancelled_orders', (select count(*) from o where status in ('da_huy','bom_hang')),
+    'fees', coalesce((select sum(ship + fee) from v), 0),
+    'units', coalesce((select sum(qty) from it), 0),
+    'cogs', coalesce((select sum(qty * unit_cost) from itc where unit_cost is not null), 0),
+    'revenue_with_cost', coalesce((select sum(qty * price) from itc where unit_cost is not null), 0),
+    'units_without_cost', coalesce((select sum(qty) from itc where unit_cost is null), 0),
+    'customers', (select count(distinct phone) from v),
+    'repeat_customers', (select count(*) from (select phone from v group by phone having count(*) > 1) x),
+    'cod_orders', (select count(*) from o where method = 'cod'),
+    'cod_bom', (select count(*) from o where method = 'cod' and status = 'bom_hang'),
+    'by_status', coalesce((select jsonb_object_agg(status, n) from (select status, count(*) n from o group by status) x), '{}'::jsonb),
+    'by_method', coalesce((select jsonb_object_agg(method, jsonb_build_object('orders', n, 'revenue', rev)) from (select method, count(*) n, sum(subtotal) rev from v group by method) x), '{}'::jsonb),
+    'daily', coalesce((select jsonb_agg(jsonb_build_object('day', d, 'revenue', rev, 'orders', n) order by d)
+                       from (select (created_at at time zone 'Asia/Ho_Chi_Minh')::date d, sum(subtotal) rev, count(*) n from v group by 1) x), '[]'::jsonb),
+    'top_products', coalesce((select jsonb_agg(x order by x.qty desc, x.revenue desc)
+                       from (select id, max(name) as name, sum(qty)::int as qty, sum(qty * price)::bigint as revenue from it group by id order by sum(qty) desc, sum(qty * price) desc limit 10) x), '[]'::jsonb),
+    'top_cities', coalesce((select jsonb_agg(x order by x.orders desc)
+                       from (select coalesce(nullif(city, ''), 'Không ghi') as city, count(*) as orders, sum(subtotal)::bigint as revenue from v group by 1 order by count(*) desc limit 8) x), '[]'::jsonb)
+  ) into res;
+  return res;
+end $$;
+revoke all on function public.admin_stats(timestamptz,timestamptz) from public;
+grant execute on function public.admin_stats(timestamptz,timestamptz) to authenticated;
 
 -- =====================================================================
 -- SAU KHI CHẠY XONG: cấp quyền admin cho tài khoản của bạn

@@ -40,6 +40,8 @@
     <nav class="wrap a-tabs" aria-label="Mục quản lý">
       <button type="button" data-view="orders" aria-current="page">Đơn hàng <b id="newCount" hidden></b></button>
       <button type="button" data-view="products">Sản phẩm</button>
+      <button type="button" data-view="stock">Kho <b id="lowCount" class="warn" hidden></b></button>
+      <button type="button" data-view="stats">Thống kê</button>
       <button type="button" data-view="blocked">Chặn COD</button>
       <button type="button" data-view="settings">Cài đặt</button>
     </nav>
@@ -67,6 +69,25 @@
       </div>
       <p class="result" id="pCount"></p>
       <div id="pList" class="p-list"></div>
+    </section>
+
+    <section id="v-stock" class="view" hidden>
+      <div class="tiles" id="kTiles"></div>
+      <div class="a-toolbar">
+        <input id="kSearch" type="search" placeholder="Tìm tên, thương hiệu, SKU…" aria-label="Tìm trong kho">
+        <button class="btn ghost" type="button" id="kReload">Tải lại</button>
+      </div>
+      <div class="chips" id="kFilter"></div>
+      <div id="kList" class="k-list"></div>
+      <p class="hint">Sản phẩm “Chưa quản lý kho” bán không giới hạn như trước. Bấm <strong>Nhập hàng</strong> lần đầu là bắt đầu quản lý: mỗi đơn tự trừ kho, đơn huỷ hoặc bom hàng tự hoàn kho, hết kho thì web tự báo hết hàng.</p>
+    </section>
+
+    <section id="v-stats" class="view" hidden>
+      <div class="a-toolbar">
+        <div class="chips" id="rRange" style="margin:0"></div>
+        <button class="btn ghost" type="button" id="csvBtn">Xuất file đơn hàng (CSV)</button>
+      </div>
+      <div id="statsBody"><p class="loading">Đang tính…</p></div>
     </section>
 
     <section id="v-blocked" class="view" hidden>
@@ -111,6 +132,10 @@
     <div id="eDelConfirm" class="confirm" hidden>Xoá vĩnh viễn sản phẩm này? Nếu chỉ muốn tạm ngừng bán, hãy tắt “Hiện trên web”.
       <div class="e-actions"><button class="btn danger" type="button" id="eDelYes">Xoá vĩnh viễn</button><button class="btn ghost" type="button" id="eDelNo">Không xoá</button></div></div>
   </div>
+</aside>
+<aside class="drawer editor" id="kPanel" aria-label="Nhập xuất kho">
+  <div class="dh"><h2 id="kTitle">Kho</h2><button class="x" type="button" id="kClose" aria-label="Đóng">×</button></div>
+  <div class="db" id="kBody"></div>
 </aside>
 <div class="toast" id="toast" role="status" hidden></div>
 

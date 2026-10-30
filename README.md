@@ -50,6 +50,25 @@ Trên admin, mỗi đơn có ô **Đơn vị vận chuyển** và **Mã vận đ
 
 Link xem hành trình của từng hãng nằm trong `site.json` → `carriers` (`{code}` là chỗ điền mã vận đơn). Hãng nào để `url` trống thì web chỉ hiện mã vận đơn để khách tự tra. Bạn nên bấm thử link của từng hãng sau lần gửi hàng đầu tiên, nếu hãng đổi đường dẫn thì sửa lại trong file này.
 
+## Quản lý kho
+
+Mục **Kho** trên admin. Sản phẩm "Chưa quản lý kho" bán không giới hạn như trước. Bấm **Nhập hàng** lần đầu (kèm giá vốn) là sản phẩm bắt đầu được quản lý:
+- Mỗi đơn tự trừ kho. Đơn huỷ hoặc bom hàng tự hoàn kho, mở lại đơn thì trừ lại.
+- Hết kho: web tự đổi sang "Hết hàng", khách không đặt quá số tồn. Hai khách cùng mua món cuối cùng thì chỉ một người mua được.
+- Nhập hàng nhiều lô giá khác nhau, giá vốn tự tính bình quân.
+- **Kiểm kê**: nhập số đếm thực tế, hệ thống tự ghi chênh lệch. **Hàng hỏng / hết hạn** và **Khách trả hàng** cũng có mục riêng.
+- Lịch sử nhập xuất của từng sản phẩm, mã SKU, mức báo "Sắp hết", ước tính còn đủ bán bao nhiêu ngày.
+- Giá vốn và số tồn **chỉ admin xem được**, khách không thể đọc.
+
+Lưu ý: đơn chuyển khoản chưa thanh toán vẫn giữ hàng trong kho. Nếu khách không chuyển khoản, hãy đổi đơn sang "Đã huỷ" để trả hàng về kho.
+
+## Thống kê
+
+Mục **Thống kê**: chọn Hôm nay / 7 ngày / 30 ngày / Tháng này / Tháng trước / Tất cả.
+- Doanh thu (chỉ tiền hàng của đơn đã xác nhận trở đi), giá trị trung bình mỗi đơn, lợi nhuận gộp và biên lợi nhuận, đơn đang chờ xử lý, tỷ lệ bom hàng COD, khách mua lại.
+- Biểu đồ doanh thu theo ngày, top 10 sản phẩm bán chạy, chuyển khoản so với COD, trạng thái đơn, tỉnh/thành nhiều đơn.
+- **Xuất file đơn hàng (CSV)** mở được bằng Excel hoặc Google Sheets.
+
 ## Trang admin làm được gì
 
 - **Đơn hàng**: lọc theo trạng thái, tìm theo mã/tên/SĐT, đổi trạng thái, đánh dấu đã nhận tiền/cọc, nhắn Zalo, gọi, ghi chú nội bộ. Bấm **Bom hàng** để chặn COD số đó ngay.

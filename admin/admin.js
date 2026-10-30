@@ -49,6 +49,7 @@
     needRebuild(rebuildPending());
     show("orders");
     subscribe();
+    sb.from("inventory").select("stock,low_stock").then(({ data }) => { const n = (data || []).filter(r => r.stock <= r.low_stock).length; $("lowCount").textContent = n; $("lowCount").hidden = !n; });
   }
   $("loginForm").addEventListener("submit", async e => {
     e.preventDefault();
@@ -64,8 +65,8 @@
   const loaded = {};
   function show(view) {
     document.querySelectorAll("[data-view]").forEach(b => b.dataset.view === view ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
-    ["orders", "products", "blocked", "settings"].forEach(v => ($(`v-${v}`).hidden = v !== view));
-    if (!loaded[view]) { loaded[view] = true; ({ orders: loadOrders, products: loadProducts, blocked: loadBlocked, settings: loadSettings })[view](); }
+    ["orders", "products", "stock", "stats", "blocked", "settings"].forEach(v => ($(`v-${v}`).hidden = v !== view));
+    if (!loaded[view]) { loaded[view] = true; ({ orders: loadOrders, products: loadProducts, stock: loadStock, stats: loadStats, blocked: loadBlocked, settings: loadSettings })[view](); }
     if (view === "orders") { fresh.clear(); $("newCount").hidden = true; document.title = "Luna Admin"; }
   }
 
@@ -169,6 +170,10 @@
   }
   async function toggleProduct(id, field) {
     const p = products.find(x => x.id === id);
+    if (field === "in_stock") {
+      const { data: tracked } = await sb.from("inventory").select("stock").eq("product_id", id).maybeSingle();
+      if (tracked) { toast(`Sản phẩm này đang quản lý theo kho (còn ${tracked.stock}). Vào mục Kho để nhập hàng hoặc kiểm kê.`); return; }
+    }
     const { data, error } = await sb.from("products").update({ [field]: !p[field] }).eq("id", id).select().single();
     if (error) return fail(error, "Không lưu được");
     products = products.map(x => (x.id === id ? data : x)); renderProducts(); needRebuild(true);
@@ -267,6 +272,263 @@
   }
   function closeEditor() { $("editor").classList.remove("on"); $("scrim").classList.remove("on"); editing = null; }
 
+  /* ================= KHO ================= */
+  let inv = {}, sold30 = {}, kFilter = "all", kQuery = "", kProduct = null;
+  const KIND = { nhap: "Nhập hàng", ban: "Bán", huy_don: "Hoàn kho (huỷ đơn)", tra: "Khách trả hàng", hong: "Hàng hỏng / hết hạn", kiem_ke: "Kiểm kê" };
+  const stockState = p => {
+    const r = inv[p.id];
+    if (!r) return { key: "untracked", label: "Chưa quản lý kho", cls: "" };
+    if (r.stock <= 0) return { key: "out", label: r.stock < 0 ? `Âm ${-r.stock}` : "Hết hàng", cls: "bad" };
+    if (r.stock <= r.low_stock) return { key: "low", label: `Sắp hết · còn ${r.stock}`, cls: "warn" };
+    return { key: "ok", label: `Còn ${r.stock}`, cls: "good" };
+  };
+  async function ensureProducts() { if (!products.length) { const { data, error } = await sb.from("products").select("*").order("id"); if (error) throw error; products = data; } }
+  async function loadStock() {
+    $("kList").innerHTML = `<p class="loading">Đang tải kho…</p>`;
+    try {
+      await ensureProducts();
+      const since = new Date(Date.now() - 30 * 864e5).toISOString();
+      const [a, b] = await Promise.all([
+        sb.from("inventory").select("*"),
+        sb.from("stock_moves").select("product_id,qty,kind").in("kind", ["ban", "huy_don"]).gte("created_at", since).limit(10000),
+      ]);
+      if (a.error) throw a.error; if (b.error) throw b.error;
+      inv = Object.fromEntries(a.data.map(r => [r.product_id, r]));
+      sold30 = {}; b.data.forEach(m => { sold30[m.product_id] = (sold30[m.product_id] || 0) - m.qty; });
+      renderStock();
+    } catch (e) { $("kList").innerHTML = `<p class="err">Không tải được kho: ${esc(e.message)}. Nếu báo thiếu bảng “inventory”, hãy chạy lại supabase/schema.sql.</p>`; }
+  }
+  function renderStock() {
+    const tracked = products.filter(p => inv[p.id]);
+    const units = tracked.reduce((n, p) => n + Math.max(0, inv[p.id].stock), 0);
+    const value = tracked.reduce((n, p) => n + Math.max(0, inv[p.id].stock) * inv[p.id].cost, 0);
+    const low = products.filter(p => stockState(p).key === "low"), out = products.filter(p => stockState(p).key === "out");
+    $("lowCount").textContent = low.length + out.length; $("lowCount").hidden = !(low.length + out.length);
+    $("kTiles").innerHTML = [
+      ["Đang quản lý kho", `${tracked.length}<small>/${products.length} sản phẩm</small>`],
+      ["Tổng tồn", `${units.toLocaleString("vi-VN")}<small> sản phẩm</small>`],
+      ["Giá trị tồn (giá vốn)", vnd(value)],
+      ["Sắp hết", `${low.length}`, low.length ? "warn" : ""],
+      ["Hết hàng", `${out.length}`, out.length ? "bad" : ""],
+    ].map(([l, v, c]) => `<div class="tile ${c || ""}"><span>${l}</span><strong>${v}</strong></div>`).join("");
+    const counts = { all: products.length, low: low.length, out: out.length, untracked: products.length - tracked.length };
+    $("kFilter").innerHTML = [["all", "Tất cả"], ["low", "Sắp hết"], ["out", "Hết hàng"], ["untracked", "Chưa quản lý kho"]]
+      .map(([k, l]) => `<button type="button" class="chip" data-kf="${k}" aria-pressed="${kFilter === k}">${l}<b>${counts[k]}</b></button>`).join("");
+    const q = norm(kQuery);
+    const order = { out: 0, low: 1, ok: 2, untracked: 3 };
+    const list = products.filter(p => (kFilter === "all" || stockState(p).key === kFilter) && (!q || norm(`${p.name} ${p.brand} ${inv[p.id]?.sku || ""}`).includes(q)))
+      .sort((a, b) => order[stockState(a).key] - order[stockState(b).key] || a.name.localeCompare(b.name, "vi"));
+    $("kList").innerHTML = list.length ? `<div class="k-head" aria-hidden="true"><span>Sản phẩm</span><span>Tồn kho</span><span>Giá vốn</span><span>Bán 30 ngày</span><span></span></div>` + list.map(p => {
+      const r = inv[p.id], st = stockState(p), s30 = sold30[p.id] || 0;
+      const days = r && r.stock > 0 && s30 > 0 ? Math.floor(r.stock / (s30 / 30)) : null;
+      return `<div class="k-row${p.visible ? "" : " off"}">
+        <div class="k-name"><div class="p-thumb" style="background:${esc(p.tint)}">${p.images && p.images[0] ? `<img src="${esc(p.images[0])}" alt="" loading="lazy">` : ""}</div>
+          <div><div class="p-name">${esc(p.name)}</div><div class="p-sub">${esc(p.brand)} · ${esc(p.vol)}${r && r.sku ? ` · SKU ${esc(r.sku)}` : ""}</div></div></div>
+        <div><span class="st-chip ${st.cls}">${st.label}</span>${days !== null ? `<div class="p-sub">đủ bán ~${days} ngày</div>` : ""}</div>
+        <div class="num">${r && r.cost ? vnd(r.cost) : `<span class="muted">—</span>`}</div>
+        <div class="num">${s30}</div>
+        <div class="k-act"><button type="button" class="btn sm" data-kin="${p.id}">Nhập hàng</button><button type="button" class="btn ghost sm" data-kopen="${p.id}">Chi tiết</button></div>
+      </div>`;
+    }).join("") : `<p class="loading">Không có sản phẩm nào.</p>`;
+  }
+  async function openStock(id, kind) {
+    kProduct = products.find(p => p.id === id);
+    const r = inv[id];
+    $("kTitle").textContent = kProduct.name;
+    $("kBody").innerHTML = `
+      <div class="tiles compact">
+        <div class="tile"><span>Tồn hiện tại</span><strong>${r ? r.stock : "—"}</strong></div>
+        <div class="tile"><span>Giá vốn bình quân</span><strong>${r && r.cost ? vnd(r.cost) : "—"}</strong></div>
+        <div class="tile"><span>Giá bán</span><strong>${vnd(kProduct.sale || kProduct.price)}</strong></div>
+      </div>
+      ${r && r.cost && (kProduct.sale || kProduct.price) ? `<p class="hint">Lãi gộp mỗi sản phẩm: ${vnd((kProduct.sale || kProduct.price) - r.cost)} (${Math.round((1 - r.cost / (kProduct.sale || kProduct.price)) * 100)}%)</p>` : ""}
+      <form id="kForm" class="panel" novalidate>
+        <label class="f" for="kKind">Loại<select id="kKind">
+          <option value="nhap"${kind === "nhap" ? " selected" : ""}>Nhập hàng (cộng vào kho)</option>
+          <option value="kiem_ke"${kind === "kiem_ke" ? " selected" : ""}>Kiểm kê (nhập số đếm thực tế)</option>
+          <option value="hong">Hàng hỏng / hết hạn (trừ khỏi kho)</option>
+          <option value="tra">Khách trả hàng (cộng vào kho)</option>
+        </select></label>
+        <div class="two">
+          <label class="f" for="kQty"><span id="kQtyLabel">Số lượng</span><input id="kQty" type="number" min="0" step="1" inputmode="numeric" required></label>
+          <label class="f" for="kCost" id="kCostWrap">Giá nhập mỗi cái (đ)<input id="kCost" type="number" min="0" step="1000" inputmode="numeric" placeholder="${r && r.cost ? r.cost : ""}"></label>
+        </div>
+        <label class="f" for="kNote">Ghi chú<input id="kNote" placeholder="Lô hàng, nhà cung cấp, lý do…"></label>
+        <p class="err" id="kErr" role="alert"></p>
+        <button class="btn" type="submit" id="kSave">Lưu</button>
+      </form>
+      <form id="kMeta" class="panel" novalidate>
+        <legend>Thông tin kho</legend>
+        <div class="two">
+          <label class="f" for="kSku">Mã SKU<input id="kSku" value="${esc(r?.sku || "")}" placeholder="Mã vạch / mã nội bộ"></label>
+          <label class="f" for="kLow">Báo sắp hết khi còn<input id="kLow" type="number" min="0" value="${r ? r.low_stock : 3}"></label>
+        </div>
+        <div class="e-actions"><button class="btn ghost" type="submit">Lưu thông tin</button>${r ? `<button class="btn ghost" type="button" id="kUntrack">Ngừng quản lý kho</button>` : ""}</div>
+        <div id="kUntrackConfirm" class="confirm" hidden>Ngừng quản lý kho: sản phẩm sẽ bán không giới hạn, đơn mới không trừ kho nữa. Lịch sử nhập xuất vẫn giữ.
+          <div class="e-actions"><button class="btn danger sm" type="button" id="kUntrackYes">Ngừng quản lý</button><button class="btn ghost sm" type="button" id="kUntrackNo">Huỷ</button></div></div>
+      </form>
+      <div><p class="eyebrow">Lịch sử nhập xuất</p><div id="kMoves" class="moves"><p class="loading">Đang tải…</p></div></div>`;
+    syncKindForm();
+    $("kPanel").classList.add("on"); $("scrim").classList.add("on");
+    setTimeout(() => $("kQty").focus(), 50);
+    const { data, error } = await sb.from("stock_moves").select("*").eq("product_id", id).order("created_at", { ascending: false }).limit(40);
+    $("kMoves").innerHTML = error ? `<p class="err">${esc(error.message)}</p>` : data.length ? data.map(m => `<div class="move">
+      <div><strong>${KIND[m.kind] || m.kind}</strong><div class="p-sub">${fmtTime(m.created_at)}${m.note ? " · " + esc(m.note) : ""}${m.unit_cost ? ` · giá nhập ${vnd(m.unit_cost)}` : ""}</div></div>
+      <div class="num"><span class="${m.qty > 0 ? "plus" : "minus"}">${m.qty > 0 ? "+" : ""}${m.qty}</span><div class="p-sub">còn ${m.stock_after ?? "?"}</div></div></div>`).join("") : `<p class="hint">Chưa có lần nhập xuất nào.</p>`;
+  }
+  function syncKindForm() {
+    const k = $("kKind").value;
+    $("kQtyLabel").textContent = k === "kiem_ke" ? "Số đếm thực tế trong kho" : "Số lượng";
+    $("kCostWrap").hidden = k !== "nhap";
+  }
+  async function saveStock() {
+    const k = $("kKind").value, qty = parseInt($("kQty").value, 10), cost = $("kCost").value ? parseInt($("kCost").value, 10) : null;
+    if (!(qty >= 0) || (k !== "kiem_ke" && qty === 0)) { $("kErr").textContent = "Nhập số lượng lớn hơn 0."; return; }
+    if (k === "nhap" && !inv[kProduct.id] && cost === null) { $("kErr").textContent = "Lần nhập đầu tiên, hãy nhập giá vốn để tính lợi nhuận."; return; }
+    const btn = $("kSave"); btn.disabled = true; btn.textContent = "Đang lưu…";
+    const before = inv[kProduct.id]?.stock;
+    const { data, error } = await sb.rpc("adjust_stock", { p_product_id: kProduct.id, p_kind: k, p_qty: qty, p_unit_cost: k === "nhap" ? cost : null, p_note: $("kNote").value.trim() });
+    btn.disabled = false; btn.textContent = "Lưu";
+    if (error) { $("kErr").textContent = `Không lưu được: ${error.message}`; return; }
+    inv[kProduct.id] = data;
+    const p = products.find(x => x.id === kProduct.id); const wasIn = p.in_stock; p.in_stock = data.stock > 0;
+    if (wasIn !== p.in_stock || before === undefined) needRebuild(true);
+    toast(`${KIND[k]}: ${kProduct.name} còn ${data.stock}`);
+    renderStock(); openStock(kProduct.id);
+  }
+  async function saveStockMeta() {
+    const row = { product_id: kProduct.id, sku: $("kSku").value.trim(), low_stock: Math.max(0, parseInt($("kLow").value, 10) || 0) };
+    const { data, error } = inv[kProduct.id]
+      ? await sb.from("inventory").update({ sku: row.sku, low_stock: row.low_stock }).eq("product_id", kProduct.id).select().single()
+      : { data: null, error: { message: "Hãy nhập hàng lần đầu trước khi lưu thông tin kho." } };
+    if (error) { $("kErr").textContent = error.message; return; }
+    inv[kProduct.id] = data; renderStock(); toast("Đã lưu thông tin kho");
+  }
+  async function untrack() {
+    const { error } = await sb.from("inventory").delete().eq("product_id", kProduct.id);
+    if (error) { $("kErr").textContent = error.message; return; }
+    delete inv[kProduct.id];
+    await sb.from("products").update({ in_stock: true }).eq("id", kProduct.id);
+    const p = products.find(x => x.id === kProduct.id); p.in_stock = true;
+    needRebuild(true); renderStock(); closeStock(); toast("Đã ngừng quản lý kho, sản phẩm bán không giới hạn");
+  }
+  function closeStock() { $("kPanel").classList.remove("on"); $("scrim").classList.remove("on"); kProduct = null; }
+
+  /* ================= THỐNG KÊ ================= */
+  let range = "30d", lastStats = null;
+  const vnDay = (d = new Date()) => new Date(d.getTime() + 7 * 3600e3).toISOString().slice(0, 10); // ngày theo giờ VN
+  const vnStart = ymd => new Date(`${ymd}T00:00:00+07:00`);
+  function rangeDates(k) {
+    const today = vnDay(), t0 = vnStart(today), end = new Date(t0.getTime() + 864e5);
+    const [y, m] = today.split("-").map(Number);
+    if (k === "today") return [t0, end];
+    if (k === "7d") return [new Date(t0 - 6 * 864e5), end];
+    if (k === "30d") return [new Date(t0 - 29 * 864e5), end];
+    if (k === "month") return [vnStart(`${today.slice(0, 7)}-01`), end];
+    if (k === "lastmonth") { const py = m === 1 ? y - 1 : y, pm = m === 1 ? 12 : m - 1; return [vnStart(`${py}-${String(pm).padStart(2, "0")}-01`), vnStart(`${today.slice(0, 7)}-01`)]; }
+    return [new Date("2024-01-01T00:00:00+07:00"), end];
+  }
+  const RANGES = [["today", "Hôm nay"], ["7d", "7 ngày"], ["30d", "30 ngày"], ["month", "Tháng này"], ["lastmonth", "Tháng trước"], ["all", "Tất cả"]];
+  const short = n => n >= 1e9 ? (n / 1e9).toFixed(1).replace(".", ",") + " tỷ" : n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1).replace(".", ",") + "tr" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
+  async function loadStats() {
+    $("rRange").innerHTML = RANGES.map(([k, l]) => `<button type="button" class="chip" data-range="${k}" aria-pressed="${range === k}">${l}</button>`).join("");
+    $("statsBody").innerHTML = `<p class="loading">Đang tính…</p>`;
+    const [from, to] = rangeDates(range);
+    const { data, error } = await sb.rpc("admin_stats", { p_from: from.toISOString(), p_to: to.toISOString() });
+    if (error) { $("statsBody").innerHTML = `<p class="err">Không tải được thống kê: ${esc(error.message)}. Nếu báo thiếu hàm “admin_stats”, hãy chạy lại supabase/schema.sql.</p>`; return; }
+    lastStats = { data, from, to }; renderStats();
+  }
+  function renderStats() {
+    const { data: s, from, to } = lastStats;
+    const profit = s.revenue_with_cost - s.cogs;
+    const margin = s.revenue_with_cost ? Math.round((profit / s.revenue_with_cost) * 100) : 0;
+    const aov = s.valid_orders ? Math.round(s.revenue / s.valid_orders) : 0;
+    const bom = s.cod_orders ? Math.round((s.cod_bom / s.cod_orders) * 100) : 0;
+    const bank = s.by_method.bank || { orders: 0, revenue: 0 }, cod = s.by_method.cod || { orders: 0, revenue: 0 };
+    // biểu đồ: đủ mọi ngày trong khoảng (ngày trống = 0)
+    const map = Object.fromEntries(s.daily.map(d => [d.day, d]));
+    let start = from; if (range === "all" && s.daily.length) start = vnStart(s.daily[0].day);
+    const days = []; for (let t = start.getTime(); t < to.getTime() && days.length < 400; t += 864e5) { const k = vnDay(new Date(t)); days.push(map[k] || { day: k, revenue: 0, orders: 0 }); }
+    $("statsBody").innerHTML = `
+      <div class="tiles">
+        <div class="tile hero"><span>Doanh thu</span><strong>${vnd(s.revenue)}</strong><small>${s.valid_orders} đơn đã xác nhận · TB ${vnd(aov)}/đơn</small></div>
+        <div class="tile"><span>Lợi nhuận gộp</span><strong>${s.revenue_with_cost ? vnd(profit) : "—"}</strong><small>${s.revenue_with_cost ? `biên ${margin}%` : "cần nhập giá vốn ở mục Kho"}${s.units_without_cost ? ` · ${s.units_without_cost} sp chưa có giá vốn` : ""}</small></div>
+        <div class="tile"><span>Đang chờ xử lý</span><strong>${s.pending_orders} đơn</strong><small>${vnd(s.pending_revenue)} chưa tính vào doanh thu</small></div>
+        <div class="tile ${bom >= 15 ? "bad" : bom >= 8 ? "warn" : ""}"><span>Tỷ lệ bom hàng COD</span><strong>${s.cod_orders ? bom + "%" : "—"}</strong><small>${s.cod_bom}/${s.cod_orders} đơn COD</small></div>
+        <div class="tile"><span>Sản phẩm bán ra</span><strong>${s.units}</strong><small>${s.customers} khách · ${s.repeat_customers} khách mua lại</small></div>
+      </div>
+      <section class="panel">
+        <div class="sec-row"><h3>Doanh thu theo ngày</h3><span class="p-sub">${days.length ? `${days[0].day.split("-").reverse().join("/")} – ${days[days.length - 1].day.split("-").reverse().join("/")}` : ""}</span></div>
+        ${chart(days)}
+        <details><summary class="p-sub" style="cursor:pointer">Xem bảng số liệu</summary>
+          <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Ngày</th><th class="num">Đơn</th><th class="num">Doanh thu</th></tr></thead>
+          <tbody>${days.filter(d => d.orders).reverse().map(d => `<tr><td>${d.day.split("-").reverse().join("/")}</td><td class="num">${d.orders}</td><td class="num">${vnd(d.revenue)}</td></tr>`).join("") || `<tr><td colspan="3" class="muted">Chưa có đơn</td></tr>`}</tbody></table></div></details>
+      </section>
+      <div class="two-col">
+        <section class="panel"><h3>Sản phẩm bán chạy</h3>${s.top_products.length ? `<table class="tbl"><thead><tr><th>Sản phẩm</th><th class="num">SL</th><th class="num">Doanh thu</th></tr></thead><tbody>
+          ${s.top_products.map(p => `<tr><td>${esc(p.name)}<div class="bar"><i style="width:${Math.max(3, (p.qty / s.top_products[0].qty) * 100)}%"></i></div></td><td class="num">${p.qty}</td><td class="num">${vnd(p.revenue)}</td></tr>`).join("")}</tbody></table>` : `<p class="hint">Chưa có đơn đã xác nhận trong khoảng này.</p>`}</section>
+        <section class="panel"><h3>Thanh toán</h3>
+          <table class="tbl"><tbody>
+            <tr><td>Chuyển khoản</td><td class="num">${bank.orders} đơn</td><td class="num">${vnd(bank.revenue || 0)}</td></tr>
+            <tr><td>COD</td><td class="num">${cod.orders} đơn</td><td class="num">${vnd(cod.revenue || 0)}</td></tr>
+          </tbody></table>
+          <h3 style="margin-top:18px">Trạng thái đơn</h3>
+          <table class="tbl"><tbody>${ST.filter(([k]) => s.by_status[k]).map(([k, l]) => `<tr><td><span class="st st-${k}">${l}</span></td><td class="num">${s.by_status[k]}</td></tr>`).join("") || `<tr><td class="muted">Chưa có đơn</td></tr>`}</tbody></table>
+          <h3 style="margin-top:18px">Tỉnh / thành nhiều đơn</h3>
+          <table class="tbl"><tbody>${s.top_cities.map(c => `<tr><td>${esc(c.city)}</td><td class="num">${c.orders} đơn</td><td class="num">${vnd(c.revenue)}</td></tr>`).join("") || `<tr><td class="muted">Chưa có đơn</td></tr>`}</tbody></table>
+        </section>
+      </div>
+      <p class="hint">Doanh thu chỉ tính tiền hàng của đơn Đã xác nhận, Đang giao, Hoàn thành (không gồm phí ship, phí thu hộ, đơn huỷ và bom hàng). Lợi nhuận gộp = doanh thu − giá vốn, chỉ tính các sản phẩm đã có giá vốn.</p>`;
+    bindChart();
+  }
+  function chart(days) {
+    const W = 720, H = 220, L = 52, R = 8, T = 10, B = 26;
+    const max = Math.max(...days.map(d => d.revenue), 0);
+    if (!max) return `<p class="hint" style="padding:30px 0;text-align:center">Chưa có doanh thu trong khoảng này.</p>`;
+    const step = (() => { const raw = max / 4, p = 10 ** Math.floor(Math.log10(raw)); return [1, 2, 2.5, 5, 10].map(m => m * p).find(v => v >= raw); })();
+    const top = step * 4, y = v => T + (H - T - B) * (1 - v / top);
+    const bw = (W - L - R) / days.length, gap = Math.min(2, bw * 0.25);
+    const every = Math.ceil(days.length / 8);
+    const ticks = [0, 1, 2, 3, 4].map(i => `<line x1="${L}" x2="${W - R}" y1="${y(step * i)}" y2="${y(step * i)}" class="grid"/><text x="${L - 8}" y="${y(step * i) + 4}" text-anchor="end" class="ax">${short(step * i)}</text>`).join("");
+    const bars = days.map((d, i) => {
+      const x = L + i * bw, h = Math.max(0, y(0) - y(d.revenue)), r = Math.min(4, (bw - gap) / 2, h);
+      const bx = x + gap / 2, bwid = Math.max(1, bw - gap), by = y(d.revenue);
+      const path = h > 0 ? `<path d="M${bx},${y(0)} V${by + r} Q${bx},${by} ${bx + r},${by} H${bx + bwid - r} Q${bx + bwid},${by} ${bx + bwid},${by + r} V${y(0)} Z" class="bar-m"/>` : "";
+      const label = i % every === 0 ? `<text x="${x + bw / 2}" y="${H - 8}" text-anchor="middle" class="ax">${d.day.slice(8)}/${d.day.slice(5, 7)}</text>` : "";
+      return `<g class="hit" data-i="${i}" tabindex="0" aria-label="${d.day}: ${vnd(d.revenue)}, ${d.orders} đơn"><rect x="${x}" y="${T}" width="${bw}" height="${H - T - B}" fill="transparent"/>${path}</g>${label}`;
+    }).join("");
+    return `<div class="chart" id="chart"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Biểu đồ doanh thu theo ngày">${ticks}<line x1="${L}" x2="${W - R}" y1="${y(0)}" y2="${y(0)}" class="base"/>${bars}</svg><div class="tip" id="tip" hidden></div></div>`;
+  }
+  function bindChart() {
+    const c = $("chart"); if (!c) return;
+    const days = (() => { const { data: s, from, to } = lastStats; const map = Object.fromEntries(s.daily.map(d => [d.day, d])); let start = from; if (range === "all" && s.daily.length) start = vnStart(s.daily[0].day); const out = []; for (let t = start.getTime(); t < to.getTime() && out.length < 400; t += 864e5) { const k = vnDay(new Date(t)); out.push(map[k] || { day: k, revenue: 0, orders: 0 }); } return out; })();
+    const tip = $("tip");
+    const showTip = g => {
+      const d = days[+g.dataset.i]; const b = g.getBoundingClientRect(), cb = c.getBoundingClientRect();
+      tip.innerHTML = `<strong>${d.day.split("-").reverse().join("/")}</strong><br>${vnd(d.revenue)} · ${d.orders} đơn`;
+      tip.hidden = false;
+      tip.style.left = Math.min(cb.width - tip.offsetWidth, Math.max(0, b.left - cb.left + b.width / 2 - tip.offsetWidth / 2)) + "px";
+      c.querySelectorAll(".hit").forEach(x => x.classList.toggle("on", x === g));
+    };
+    c.querySelectorAll(".hit").forEach(g => { g.addEventListener("mouseenter", () => showTip(g)); g.addEventListener("focus", () => showTip(g)); g.addEventListener("click", () => showTip(g)); });
+    c.addEventListener("mouseleave", () => { tip.hidden = true; c.querySelectorAll(".hit.on").forEach(x => x.classList.remove("on")); });
+  }
+  async function exportCsv() {
+    const [from, to] = rangeDates(range);
+    const { data, error } = await sb.from("orders").select("*").gte("created_at", from.toISOString()).lt("created_at", to.toISOString()).order("created_at").limit(5000);
+    if (error) return fail(error, "Không xuất được");
+    const cell = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const head = ["Mã đơn", "Thời gian", "Trạng thái", "Thanh toán", "Đã nhận tiền", "Khách", "SĐT", "Địa chỉ", "Tỉnh/thành", "Sản phẩm", "Tiền hàng", "Phí ship", "Phí thu hộ", "Tổng", "Cọc", "Hãng VC", "Mã vận đơn", "Ghi chú khách", "Ghi chú nội bộ"];
+    const rows = data.map(o => [o.code, fmtTime(o.created_at), stName[o.status], o.method === "bank" ? "Chuyển khoản" : "COD", o.paid ? "Có" : "", o.buyer_name, o.phone, o.address, o.city,
+      (o.items || []).map(i => `${i.qty} x ${i.name}`).join("; "), o.subtotal, o.ship, o.fee, o.total, o.deposit, o.carrier, o.tracking_code, o.note, o.admin_note]);
+    const csv = "﻿" + [head, ...rows].map(r => r.map(cell).join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    a.download = `don-hang-luna-${vnDay(from)}_${vnDay(new Date(to - 1))}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    toast(`Đã xuất ${data.length} đơn`);
+  }
+
   /* ================= CHẶN COD ================= */
   async function loadBlocked() {
     const { data, error } = await sb.from("blocked_phones").select("*").order("created_at", { ascending: false });
@@ -357,6 +619,16 @@
       if (error) fail(error); else { toast(`Đã bỏ chặn ${d.unblock}`); loadBlocked(); }
     }
     else if (t.id === "oReload") loadOrders();
+    else if (d.kf) { kFilter = d.kf; renderStock(); }
+    else if (d.kin) openStock(Number(d.kin), "nhap");
+    else if (d.kopen) openStock(Number(d.kopen));
+    else if (t.id === "kClose") closeStock();
+    else if (t.id === "kReload") loadStock();
+    else if (t.id === "kUntrack") $("kUntrackConfirm").hidden = false;
+    else if (t.id === "kUntrackNo") $("kUntrackConfirm").hidden = true;
+    else if (t.id === "kUntrackYes") untrack();
+    else if (d.range) { range = d.range; loadStats(); }
+    else if (t.id === "csvBtn") exportCsv();
   });
   document.addEventListener("change", e => {
     const t = e.target, d = t.dataset;
@@ -376,12 +648,18 @@
       updateOrder(o.id, patch, patch.status ? "Đã lưu mã vận đơn, chuyển sang “Đang giao”" : "Đã lưu mã vận đơn");
     }
     else if (t.id === "e_upload") upload(t.files);
+    else if (t.id === "kKind") syncKindForm();
   });
   $("eForm").addEventListener("submit", e => { e.preventDefault(); saveProduct(); });
+  document.addEventListener("submit", e => {
+    if (e.target.id === "kForm") { e.preventDefault(); saveStock(); }
+    if (e.target.id === "kMeta") { e.preventDefault(); saveStockMeta(); }
+  });
+  $("kSearch").addEventListener("input", e => { kQuery = e.target.value; renderStock(); });
   $("oSearch").addEventListener("input", e => { oQuery = e.target.value; renderOrders(); });
   $("pSearch").addEventListener("input", e => { pQuery = e.target.value; renderProducts(); });
-  $("scrim").addEventListener("click", closeEditor);
-  document.addEventListener("keydown", e => { if (e.key === "Escape") closeEditor(); });
+  $("scrim").addEventListener("click", () => { closeEditor(); closeStock(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape") { closeEditor(); closeStock(); } });
 
   /* ---------- khởi động ---------- */
   sb.auth.getSession().then(({ data: { session } }) => (session ? enter(session) : showLogin()));

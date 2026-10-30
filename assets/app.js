@@ -353,6 +353,29 @@
     } catch (e) { /* mạng lỗi: vẫn cho đặt, server sẽ tính lại đúng */ }
   }
 
+  // Cập nhật còn hàng / giá mới nhất trên các thẻ sản phẩm và trang sản phẩm (không cần đợi build lại web)
+  async function liveStock() {
+    const cards = document.querySelectorAll(".card[data-id]"), buy = document.querySelector("[data-buy]");
+    if (!SB || (!cards.length && !buy)) return;
+    let rows;
+    try { rows = await rest("products?select=id,price,sale,in_stock"); } catch (e) { return; }
+    const byRow = Object.fromEntries(rows.map(r => [String(r.id), r]));
+    P.forEach(p => { const r = byRow[String(p.id)]; if (r) { p.inStock = r.in_stock; p.price = r.price; p.sale = r.sale || 0; } });
+    cards.forEach(c => {
+      const p = byId(c.dataset.id), btn = c.querySelector(".add"); if (!p || !btn) return;
+      if (!p.inStock) { btn.disabled = true; btn.textContent = "Hết hàng"; btn.removeAttribute("data-add"); }
+      else if (btn.disabled) { btn.disabled = false; btn.textContent = "Thêm vào giỏ"; btn.dataset.add = p.id; }
+      const pr = c.querySelector(".prices");
+      if (pr) pr.innerHTML = `<span class="price${p.sale ? " on-sale" : ""}">${vnd(priceOf(p))}</span>${p.sale ? `<s>${vnd(p.price)}</s>` : ""}`;
+    });
+    if (buy) {
+      const p = byId(buy.dataset.buy);
+      if (p && !p.inStock) buy.outerHTML = `<p class="note">Tạm hết hàng. Nhắn Zalo ${esc(CFG.zalo)} để được báo khi có hàng.</p>`;
+      const pr = document.querySelector(".pdp .prices");
+      if (p && pr) pr.innerHTML = `<span class="price${p.sale ? " on-sale" : ""}">${vnd(priceOf(p))}</span>${p.sale ? `<s>${vnd(p.price)}</s><span class="badge-off">−${Math.round((1 - p.sale / p.price) * 100)}%</span>` : ""}`;
+    }
+  }
+
   /* ---------- tra cứu đơn hàng ---------- */
   const trackEl = $("track");
   const myOrders = () => store.get("luna-my-orders", []);
@@ -485,6 +508,7 @@
 
   /* ---------- khởi động ---------- */
   renderBag();
+  liveStock();
   if (shopEl) {
     readURL(); renderShop();
     let qt; const qi = $("q");

@@ -101,3 +101,64 @@ input[type=color]{height:42px;padding:4px}
 #v-blocked .panel,#v-settings .panel{max-width:720px}
 
 @media (max-width:640px){.o-grid{grid-template-columns:minmax(0,1fr)}.p-row{grid-template-columns:44px minmax(0,1fr)}.p-right{grid-column:1/-1;justify-items:start;grid-auto-flow:column;align-items:center}.p-thumb{width:44px;height:44px}}
+
+/* ---------- kho & thống kê ---------- */
+.a-tabs b.warn{background:var(--warn)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:16px}
+.tiles.compact{grid-template-columns:repeat(3,minmax(0,1fr));margin:0}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:14px;display:grid;gap:4px;align-content:start;min-width:0}
+.tile span{font-size:12px;color:var(--muted)}
+.tile strong{font-size:22px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2;overflow-wrap:anywhere}
+.tile strong small{font-size:13px;font-weight:400;color:var(--muted)}
+.tile>small{font-size:12px;color:var(--muted)}
+.tile.hero strong{font-size:26px;color:var(--rose-deep)}
+.tile.warn{border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+.tile.warn strong{color:var(--warn)}
+.tile.bad{border-color:color-mix(in srgb,var(--sale) 45%,var(--line))}
+.tile.bad strong{color:var(--sale)}
+.tiles.compact .tile strong{font-size:17px}
+.k-list{display:grid;gap:6px}
+.k-head,.k-row{display:grid;grid-template-columns:minmax(0,2.4fr) minmax(0,1.1fr) minmax(0,.8fr) minmax(0,.7fr) auto;gap:12px;align-items:center}
+.k-head{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:4px 12px}
+.k-row{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.k-row.off{opacity:.6}
+.k-name{display:flex;gap:10px;align-items:center;min-width:0}
+.k-act{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.num{font-variant-numeric:tabular-nums;text-align:right}
+.st-chip{display:inline-block;font-size:12px;font-weight:600;border-radius:999px;padding:3px 10px;background:var(--sand);color:var(--muted)}
+.st-chip.good{background:color-mix(in srgb,var(--ok) 15%,transparent);color:var(--ok)}
+.st-chip.warn{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.st-chip.bad{background:var(--sale);color:#fff}
+.moves{display:grid;gap:6px;margin-top:8px}
+.move{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:8px 0;font-size:14px}
+.plus{color:var(--ok);font-weight:600}
+.minus{color:var(--sale);font-weight:600}
+.two-col{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:16px;margin-top:16px}
+.panel h3{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+.sec-row{display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap}
+.tbl-wrap{overflow-x:auto}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:600;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.tbl th.num{text-align:right}
+.tbl td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+.tbl tr:last-child td{border-bottom:0}
+.bar{height:6px;background:var(--sand);border-radius:999px;margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--rose);border-radius:999px}
+.chart{position:relative;margin-top:8px}
+.chart svg{width:100%;height:auto;display:block;overflow:visible}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.chart .base{stroke:var(--muted);stroke-width:1}
+.chart .ax{fill:var(--muted);font-size:11px;font-family:var(--body);font-variant-numeric:tabular-nums}
+.chart .bar-m{fill:var(--rose)}
+.chart .hit{cursor:pointer;outline:none}
+.chart .hit.on .bar-m,.chart .hit:focus .bar-m{fill:var(--rose-deep)}
+.tip{position:absolute;top:0;background:var(--ink);color:var(--bg);font-size:12px;padding:8px 10px;border-radius:10px;pointer-events:none;white-space:nowrap;font-variant-numeric:tabular-nums}
+#v-stats .a-toolbar{justify-content:space-between;margin-bottom:14px}
+@media (max-width:760px){
+  .k-head{display:none}
+  .k-row{grid-template-columns:minmax(0,1fr) auto}
+  .k-row>.num{display:none}
+  .k-act{grid-column:1/-1;justify-content:flex-start}
+  .two-col{grid-template-columns:minmax(0,1fr)}
+  .tiles.compact{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+}
