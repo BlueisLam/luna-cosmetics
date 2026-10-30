@@ -287,7 +287,7 @@
   }
   function renderDone() {
     const o = lastOrder, pay = o.method === "bank" ? o.total : o.deposit, b = CFG.bank;
-    const qr = `https://img.vietqr.io/image/${b.bin}-${b.acc}-compact2.png?amount=${pay}&addInfo=${encodeURIComponent(o.code)}&accountName=${encodeURIComponent(b.holder)}`;
+    const qr = `https://img.vietqr.io/image/${b.bin}-${b.acc}-compact2.png?amount=${pay}&addInfo=${encodeURIComponent(o.code)}${b.holder ? `&accountName=${encodeURIComponent(b.holder)}` : ""}`;
     checkoutEl.innerHTML = `<div class="done-box">
       <h1 class="display">Cảm ơn ${esc(o.buyer.name.split(" ").pop())}!</h1>
       <p>Mã đơn <strong>${o.code}</strong></p>
@@ -296,7 +296,7 @@
       <div class="bank">
         <div class="row"><span>Ngân hàng</span><span>${esc(b.name)}</span></div>
         <div class="row"><span>Số tài khoản</span><span>${esc(b.acc)}<button type="button" class="copy" data-copy="${esc(b.acc)}">Chép</button></span></div>
-        <div class="row"><span>Chủ tài khoản</span><span>${esc(b.holder)}</span></div>
+        ${b.holder ? `<div class="row"><span>Chủ tài khoản</span><span>${esc(b.holder)}</span></div>` : ""}
         <div class="row"><span>Số tiền</span><span>${vnd(pay)}</span></div>
         <div class="row"><span>Nội dung</span><span>${o.code}<button type="button" class="copy" data-copy="${o.code}">Chép</button></span></div>
       </div>
