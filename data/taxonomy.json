@@ -1,0 +1,81 @@
+{
+  "categories": {
+    "skincare": "Skincare cao cấp chính hãng từ Hàn, Nhật, Pháp: làm sạch, toner, serum, kem dưỡng, chống nắng và mặt nạ. Hàng có sẵn tại TP.HCM, giao 1–3 ngày.",
+    "makeup": "Makeup chính hãng: cushion, kem nền, phấn phủ, son môi, má hồng và phấn mắt tông nhẹ nhàng, dễ dùng hằng ngày."
+  },
+  "subs": {
+    "Làm sạch": "Dầu tẩy trang và sữa rửa mặt dịu nhẹ, làm sạch sâu mà không khô căng. Bước nền tảng của mọi chu trình skincare.",
+    "Toner": "Toner cân bằng, cấp ẩm hoặc toner chứa BHA giúp thông thoáng lỗ chân lông, chuẩn bị da cho các bước dưỡng sau.",
+    "Serum": "Serum chứa hoạt chất nồng độ cao: niacinamide, vitamin C, retinol, rau má… nhắm thẳng vào từng vấn đề da.",
+    "Kem dưỡng": "Kem dưỡng khoá ẩm, phục hồi hàng rào da và kem mắt chuyên biệt cho từng loại da.",
+    "Chống nắng": "Kem và sữa chống nắng phổ rộng SPF50+, mỏng nhẹ, không vệt trắng. Bước bắt buộc để ngừa thâm và lão hoá.",
+    "Tẩy tế bào chết": "Tẩy da chết hoá học AHA, BHA giúp da mịn, sáng và hấp thụ dưỡng chất tốt hơn.",
+    "Mặt nạ": "Mặt nạ ngủ và mặt nạ dưỡng giúp làm dịu, cấp ẩm chuyên sâu qua đêm.",
+    "Nền": "Cushion, kem nền và phấn phủ cho lớp nền mỏng mịn, lâu trôi.",
+    "Môi": "Son thỏi, son tint tông nude và hồng đất dễ dùng hằng ngày.",
+    "Má & mắt": "Má hồng và bảng mắt tông be, đào nhẹ nhàng, tự nhiên."
+  },
+  "needs": [
+    {"name":"Mụn","hint":"BHA, rau má, trà xanh","title":"Skincare cho da mụn",
+     "intro":"Sản phẩm cho da mụn chính hãng: làm sạch sâu, thông thoáng lỗ chân lông và làm dịu nốt mụn với BHA, rau má, trà xanh.",
+     "guide":["BHA (salicylic acid) tan trong dầu nên len được vào lỗ chân lông, giúp giảm mụn đầu đen và mụn ẩn. Bắt đầu 2–3 lần mỗi tuần vào buổi tối.","Rau má và panthenol giúp làm dịu da đang sưng đỏ, phù hợp dùng song song khi da mụn kèm nhạy cảm.","Đừng bỏ qua kem dưỡng và kem chống nắng: da thiếu ẩm sẽ tiết dầu nhiều hơn, còn nắng làm vết thâm sau mụn đậm hơn."]},
+    {"name":"Thâm & sáng da","hint":"Vitamin C, Niacinamide, AHA","title":"Skincare trị thâm, làm sáng da",
+     "intro":"Sản phẩm làm mờ thâm, đều màu và sáng da chính hãng với vitamin C, niacinamide, AHA và kem chống nắng phổ rộng.",
+     "guide":["Vitamin C dùng buổi sáng giúp làm sáng da và tăng khả năng bảo vệ khi đi kèm kem chống nắng.","Niacinamide làm mờ thâm, đều màu và hợp với hầu hết loại da, kể cả da dầu mụn.","AHA giúp loại bỏ tế bào chết để da sáng mịn hơn. Mọi hoạt chất làm sáng đều cần kem chống nắng mỗi ngày mới thấy hiệu quả."]},
+    {"name":"Lão hoá","hint":"Retinol, Peptide","title":"Skincare chống lão hoá",
+     "intro":"Sản phẩm chống lão hoá chính hãng: retinol, peptide giúp cải thiện nếp nhăn, làm săn và mịn da.",
+     "guide":["Retinol là hoạt chất chống lão hoá được nghiên cứu nhiều nhất. Người mới nên bắt đầu ở nồng độ thấp, 2 tối mỗi tuần rồi tăng dần.","Peptide nhẹ nhàng hơn, phù hợp vùng mắt và da nhạy cảm.","Kem chống nắng là bước chống lão hoá quan trọng nhất, nhất là khi đang dùng retinol."]},
+    {"name":"Cấp ẩm","hint":"Hyaluronic Acid, Ceramide","title":"Skincare cấp ẩm, dưỡng ẩm",
+     "intro":"Sản phẩm cấp ẩm và khoá ẩm chính hãng với hyaluronic acid, ceramide cho da căng mọng, hết khô ráp.",
+     "guide":["Hyaluronic acid kéo nước vào da, nên dùng khi da còn hơi ẩm sau toner.","Ceramide giúp khoá ẩm và củng cố hàng rào da, đặc biệt cần cho da khô và da nhạy cảm.","Da dầu vẫn cần cấp ẩm: chọn dạng gel mỏng nhẹ để không bí da."]},
+    {"name":"Nhạy cảm","hint":"Rau má, Panthenol, Amino","title":"Skincare cho da nhạy cảm",
+     "intro":"Sản phẩm dịu nhẹ cho da nhạy cảm, da yếu sau treatment: rau má, panthenol, ceramide và sữa rửa mặt amino.",
+     "guide":["Ưu tiên chu trình ít bước: làm sạch dịu nhẹ, dưỡng phục hồi và chống nắng.","Rau má, panthenol và ceramide giúp làm dịu và phục hồi hàng rào da.","Thử sản phẩm mới ở vùng nhỏ (sau tai hoặc quai hàm) 2–3 ngày trước khi dùng toàn mặt."]},
+    {"name":"Lỗ chân lông","hint":"BHA, Niacinamide","title":"Skincare thu nhỏ lỗ chân lông",
+     "intro":"Sản phẩm giúp lỗ chân lông thông thoáng và trông nhỏ hơn với BHA, niacinamide và tẩy trang làm sạch sâu.",
+     "guide":["Lỗ chân lông trông to thường do bã nhờn và tế bào chết tích tụ. Tẩy trang kỹ và dùng BHA đều đặn giúp cải thiện rõ.","Niacinamide hỗ trợ kiểm soát dầu và làm bề mặt da mịn hơn.","Kết quả cần 4–8 tuần dùng đều, hãy kiên nhẫn."]}
+  ],
+  "actives": {
+    "Niacinamide": "Niacinamide (vitamin B3) giúp làm mờ thâm, đều màu da, kiểm soát dầu và thu nhỏ lỗ chân lông. Dịu nhẹ, hợp hầu hết loại da.",
+    "Vitamin C": "Vitamin C giúp làm sáng da, mờ thâm và chống oxy hoá. Nên dùng buổi sáng cùng kem chống nắng.",
+    "Retinol": "Retinol giúp cải thiện nếp nhăn, làm mịn và đều màu da. Dùng buổi tối, bắt đầu nồng độ thấp và luôn dùng kem chống nắng.",
+    "BHA": "BHA (salicylic acid) làm sạch sâu lỗ chân lông, giảm mụn đầu đen và mụn ẩn. Hợp da dầu, da hỗn hợp.",
+    "AHA": "AHA (glycolic acid) tẩy tế bào chết bề mặt, giúp da sáng mịn và đều màu.",
+    "Hyaluronic Acid": "Hyaluronic acid cấp nước, giúp da căng mọng. Hợp mọi loại da.",
+    "Ceramide": "Ceramide phục hồi và củng cố hàng rào bảo vệ da, khoá ẩm lâu.",
+    "Rau má": "Chiết xuất rau má làm dịu da đỏ rát, hỗ trợ phục hồi da mụn và da nhạy cảm.",
+    "Panthenol": "Panthenol (vitamin B5) làm dịu, cấp ẩm và hỗ trợ phục hồi da.",
+    "Peptide": "Peptide hỗ trợ da săn chắc, cải thiện nếp nhăn nhỏ, dịu nhẹ cho vùng mắt."
+  },
+  "brands": {},
+  "policies": [
+    {"slug":"giao-hang","title":"Chính sách giao hàng","desc":"Thời gian và phí giao hàng của {name}: chuyển khoản trước miễn phí giao hàng toàn quốc.",
+     "sections":[
+      {"h":"Thời gian giao hàng","p":["Đơn được đóng gói trong ngày khi đặt trước 16:00. Thời gian nhận hàng dự kiến:"],"li":["TP. Hồ Chí Minh: 1–2 ngày","Các tỉnh thành khác: 2–4 ngày"]},
+      {"h":"Phí giao hàng","p":[],"li":["Thanh toán chuyển khoản trước: miễn phí giao hàng toàn quốc.","Thanh toán khi nhận hàng (COD): phí giao hàng {shipFee} và phí thu hộ {codFee}."]},
+      {"h":"Đơn COD","p":["Mọi đơn COD được {name} gọi hoặc nhắn Zalo xác nhận trước khi gửi.","Đơn từ {codDepositFrom} cần đặt cọc {codDepositRate} qua chuyển khoản. Đơn trên {codMax} chỉ nhận thanh toán chuyển khoản."]}
+     ]},
+    {"slug":"doi-tra","title":"Chính sách đổi trả","desc":"Điều kiện đổi trả sản phẩm tại {name}.",
+     "sections":[
+      {"h":"Trường hợp được đổi trả","p":["Trong vòng 7 ngày kể từ khi nhận hàng, {name} hỗ trợ đổi hoặc hoàn tiền khi:"],"li":["Sản phẩm bị lỗi, hư hỏng do vận chuyển.","Giao sai sản phẩm, sai dung tích hoặc màu so với đơn đặt.","Sản phẩm hết hạn sử dụng."]},
+      {"h":"Điều kiện","p":["Sản phẩm còn nguyên tem, seal, chưa qua sử dụng (trừ trường hợp lỗi từ nhà sản xuất). Vui lòng quay video khi mở hàng để được hỗ trợ nhanh nhất."]},
+      {"h":"Cách yêu cầu đổi trả","p":["Nhắn Zalo {zalo} kèm mã đơn hàng và hình ảnh, video sản phẩm. {name} phản hồi trong 24 giờ."]}
+     ]},
+    {"slug":"chinh-hang","title":"Cam kết chính hãng","desc":"{name} cam kết 100% sản phẩm chính hãng, có nguồn gốc rõ ràng.",
+     "sections":[
+      {"h":"Nguồn hàng","p":["Toàn bộ sản phẩm tại {name} được nhập từ nhà phân phối chính thức hoặc mua trực tiếp tại cửa hàng chính hãng ở nước sở tại, có hoá đơn và chứng từ nhập khẩu."]},
+      {"h":"Cam kết","p":["Nếu phát hiện hàng không chính hãng, {name} hoàn tiền 100% giá trị sản phẩm."]}
+     ]},
+    {"slug":"thanh-toan","title":"Hướng dẫn thanh toán","desc":"Các hình thức thanh toán tại {name}: chuyển khoản ngân hàng và COD.",
+     "sections":[
+      {"h":"Chuyển khoản ngân hàng (khuyến khích)","p":["Sau khi đặt hàng, bạn quét mã QR hoặc chuyển khoản theo số tài khoản hiển thị, ghi nội dung là mã đơn hàng. Đơn được đóng gói ngay khi nhận tiền và miễn phí giao hàng."]},
+      {"h":"Thanh toán khi nhận hàng (COD)","p":["Áp dụng phí giao hàng {shipFee} và phí thu hộ {codFee}. Đơn từ {codDepositFrom} cần cọc trước {codDepositRate}. Đơn trên {codMax} chỉ nhận chuyển khoản."]}
+     ]},
+    {"slug":"bao-mat","title":"Chính sách bảo mật","desc":"Cách {name} thu thập và bảo vệ thông tin khách hàng.",
+     "sections":[
+      {"h":"Thông tin thu thập","p":["{name} chỉ thu thập họ tên, số điện thoại và địa chỉ giao hàng để xử lý và giao đơn."]},
+      {"h":"Sử dụng thông tin","p":["Thông tin chỉ dùng để xác nhận, giao hàng và chăm sóc sau bán. {name} không bán hay chia sẻ thông tin cho bên thứ ba, trừ đơn vị vận chuyển."]},
+      {"h":"Liên hệ","p":["Muốn xoá thông tin của bạn, vui lòng liên hệ {email} hoặc Zalo {zalo}."]}
+     ]}
+  ]
+}

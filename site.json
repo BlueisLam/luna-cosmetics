@@ -1,0 +1,22 @@
+{
+  "name": "Luna Cosmetics",
+  "tagline": "Skincare cao cấp",
+  "url": "https://luna-cosmetics.netlify.app",
+  "description": "Luna Cosmetics – skincare và makeup cao cấp chính hãng Hàn, Nhật, Pháp. Hàng có sẵn tại TP.HCM, chuyển khoản trước miễn phí giao hàng toàn quốc.",
+  "phone": "0900 000 000",
+  "zalo": "0900 000 000",
+  "email": "hello@lunacosmetics.vn",
+  "address": "Quận 1, TP. Hồ Chí Minh",
+  "facebook": "",
+  "tiktok": "",
+  "instagram": "",
+  "order": {
+    "shipFee": 30000,
+    "codFee": 15000,
+    "codDepositFrom": 1000000,
+    "codDepositRate": 0.3,
+    "codMax": 5000000,
+    "bank": { "name": "Vietcombank", "bin": "970436", "acc": "0000000000", "holder": "LUNA COSMETICS" },
+    "blockedPhones": ["0900000001", "0900000002"]
+  }
+}
