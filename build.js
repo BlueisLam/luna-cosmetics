@@ -14,6 +14,8 @@ const SB = { url: (process.env.SUPABASE_URL || SITE.supabase?.url || "").replace
 const T = JSON.parse(fs.readFileSync(path.join(ROOT, "data/taxonomy.json"), "utf8"));
 const BASE = SITE.url.replace(/\/$/, "");
 const TODAY = new Date().toISOString().slice(0, 10);
+const crypto = require("crypto");
+const ASSET_V = crypto.createHash("sha1").update(["assets/style.css", "assets/app.js"].map(f => fs.readFileSync(path.join(ROOT, f), "utf8")).join("") + fs.readFileSync(path.join(ROOT, "data/products.json"), "utf8") + JSON.stringify(SITE) + Date.now()).digest("hex").slice(0, 10);
 
 /* ---------- helpers ---------- */
 const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -117,7 +119,7 @@ ${image ? `<meta property="og:image" content="${esc(image.startsWith("http") ? i
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,500;0,600;1,500&family=Be+Vietnam+Pro:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/assets/style.css">
+<link rel="stylesheet" href="/assets/style.css?v=${ASSET_V}">
 ${ld.map(o => `<script type="application/ld+json">${JSON.stringify(o).replace(/</g, "\\u003c")}</script>`).join("\n")}
 </head>
 <body>
@@ -173,8 +175,8 @@ ${body}
   <div class="db" id="dBody"></div>
   <div class="df" id="dFoot"></div>
 </aside>
-<script src="/assets/data.js"></script>
-<script src="/assets/app.js"></script>
+<script src="/assets/data.js?v=${ASSET_V}"></script>
+<script src="/assets/app.js?v=${ASSET_V}"></script>
 </body>
 </html>`;
 }
@@ -459,6 +461,7 @@ fs.writeFileSync(path.join(OUT, "robots.txt"), `User-agent: *\nAllow: /\nDisallo
 /* Trang admin */
 fs.mkdirSync(path.join(OUT, "admin"), { recursive: true });
 fs.writeFileSync(path.join(OUT, "admin/index.html"), fs.readFileSync(path.join(ROOT, "admin/index.html"), "utf8")
+  .replace(/\/(assets\/style\.css|admin\/admin\.css|admin\/admin\.js)"/g, `/$1?v=${ASSET_V}"`)
   .replace("__ADMIN_CONFIG__", JSON.stringify({ supabase: SB.url && SB.anonKey ? SB : null, site: SITE.url, shopName: SITE.name, carriers: SITE.carriers || [], taxonomy: { needs: T.needs.map(n => n.name), subs: Object.keys(T.subs) } }).replace(/</g, "\\u003c")));
 fs.copyFileSync(path.join(ROOT, "admin/admin.js"), path.join(OUT, "admin/admin.js"));
 fs.copyFileSync(path.join(ROOT, "admin/admin.css"), path.join(OUT, "admin/admin.css"));

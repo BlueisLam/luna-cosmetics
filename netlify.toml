@@ -15,10 +15,11 @@
   to = "/404.html"
   status = 404
 
+# HTML và code luôn kiểm tra bản mới (link đã gắn ?v= theo phiên bản)
 [[headers]]
   for = "/assets/*"
   [headers.values]
-    Cache-Control = "public, max-age=3600"
+    Cache-Control = "public, max-age=0, must-revalidate"
 
 [[headers]]
   for = "/admin/*"
