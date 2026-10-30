@@ -63,11 +63,12 @@ function card(p) {
   if (p.sale) tags.push(`<span class="tag sale">−${pct(p)}%</span>`);
   if (p.isNew) tags.push(`<span class="tag new">Mới về</span>`);
   if (p.pop >= 10 && tags.length < 2) tags.push(`<span class="tag">Bán chạy</span>`);
+  if (!p.inStock) tags.unshift(`<span class="tag">Hết hàng</span>`);
   return `<article class="card" data-id="${p.id}">
   <div class="shot" style="background:${p.tint}">
     <a href="${p.url}" tabindex="-1" aria-hidden="true">${picture(p)}</a>
     ${tags.length ? `<div class="tags">${tags.join("")}</div>` : ""}
-    <button class="add" data-add="${p.id}" aria-label="Thêm ${esc(p.name)} vào giỏ">Thêm vào giỏ</button>
+    ${p.inStock ? `<button class="add" data-add="${p.id}" aria-label="Thêm ${esc(p.name)} vào giỏ">Thêm vào giỏ</button>` : `<button class="add" disabled>Hết hàng</button>`}
   </div>
   <div class="meta"><a class="brand" href="${brandUrl(p.brand)}">${esc(p.brand)}</a><span class="vol">${esc(p.origin)} · ${esc(p.vol)}</span></div>
   <h3><a href="${p.url}">${esc(p.name)}</a></h3>

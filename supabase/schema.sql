@@ -145,12 +145,15 @@ begin
   if length(trim(coalesce(p_address,''))) < 6 then raise exception 'BAD_ADDRESS'; end if;
   if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 or jsonb_array_length(p_items) > 30 then raise exception 'EMPTY_CART'; end if;
   if (select count(*) from public.orders where phone = v_phone and created_at > now() - interval '10 minutes') >= 5 then raise exception 'TOO_MANY'; end if;
+  -- chống spam hàng loạt bằng nhiều số khác nhau (shop nhỏ hiếm khi vượt 60 đơn/10 phút)
+  if (select count(*) from public.orders where created_at > now() - interval '10 minutes') >= 60 then raise exception 'BUSY'; end if;
 
   for r in select * from jsonb_to_recordset(p_items) as x(id bigint, qty int) loop
     select * into pr from public.products where id = r.id and visible;
     if not found then raise exception 'PRODUCT_NOT_FOUND:%', r.id; end if;
     if not pr.in_stock then raise exception 'OUT_OF_STOCK:%', pr.name; end if;
-    v_qty := greatest(1, least(coalesce(r.qty,1), 20));
+    if coalesce(r.qty,0) < 1 or r.qty > 20 then raise exception 'BAD_QTY'; end if;
+    v_qty := r.qty;
     v_sub := v_sub + coalesce(pr.sale, pr.price) * v_qty;
     v_items := v_items || jsonb_build_object('id', pr.id, 'name', pr.name, 'brand', pr.brand, 'vol', pr.vol, 'price', coalesce(pr.sale, pr.price), 'qty', v_qty);
   end loop;

@@ -15,6 +15,12 @@
     if (!r.ok) throw new Error((data && data.message) || `HTTP ${r.status}`);
     return data;
   };
+  const rest = async path => {
+    const r = await fetch(`${SB.url}/rest/v1/${path}`, { headers: { apikey: SB.anonKey, ...(SB.anonKey.startsWith("eyJ") ? { Authorization: `Bearer ${SB.anonKey}` } : {}) } });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  };
+  const MAX_QTY = 20;
   // Số bị chặn COD được kiểm tra trên server, danh sách không lộ ra web
   const blocked = {};
   const isBlocked = s => blocked[normPhone(s)] === true;
@@ -41,7 +47,12 @@
   const save = () => { store.set("luna-cart", cart); renderBag(); if (checkoutEl) renderCheckout(); };
   const count = () => Object.values(cart).reduce((a, b) => a + b, 0);
   const subtotal = () => Object.entries(cart).reduce((s, [id, q]) => s + priceOf(byId(id)) * q, 0);
-  const add = (id, q = 1) => { cart[id] = (cart[id] || 0) + q; save(); };
+  const add = (id, q = 1) => {
+    const p = byId(id);
+    if (!p || p.inStock === false) return false;
+    cart[id] = Math.min(MAX_QTY, (cart[id] || 0) + q); save();
+    return true;
+  };
 
   function renderBag() {
     $("bagCount").textContent = count();
@@ -56,7 +67,7 @@
     }).join("") : `<div class="empty">Giỏ hàng đang trống.<br>Chọn vài món skincare yêu thích nhé.</div>`;
     $("dFoot").innerHTML = `
       <div class="row"><span>Tạm tính</span><span>${vnd(subtotal())}</span></div>
-      <div class="row save"><span>Chuyển khoản trước: miễn phí giao hàng</span><span>−${vnd(CFG.shipFee)}</span></div>
+      ${items.length ? `<div class="row save"><span>Chuyển khoản trước: miễn phí giao hàng</span><span>−${vnd(CFG.shipFee)}</span></div>` : ""}
       ${items.length ? `<a class="btn" href="/thanh-toan/">Đặt hàng</a>` : `<a class="btn ghost" href="/cua-hang/">Xem sản phẩm</a>`}`;
   }
   const openBag = () => { renderBag(); $("drawer").classList.add("on"); $("scrim").classList.add("on"); };
@@ -169,7 +180,8 @@
   let form = store.get("luna-buyer", { name: "", phone: "", addr: "", city: "TP. Hồ Chí Minh", note: "" });
   form.method = "bank";
   let lastOrder = null;
-  const CITIES = ["TP. Hồ Chí Minh", "Hà Nội", "Đà Nẵng", "Cần Thơ", "Hải Phòng", "Cà Mau", "Tỉnh thành khác"];
+  const CITIES = ["TP. Hồ Chí Minh", "Hà Nội", "Đà Nẵng", "Cần Thơ", "Hải Phòng", "Huế", "Cà Mau", "Đồng Nai", "Tây Ninh", "Vĩnh Long", "Đồng Tháp", "An Giang", "Khánh Hoà", "Lâm Đồng", "Đắk Lắk", "Gia Lai", "Quảng Ngãi", "Quảng Trị", "Nghệ An", "Hà Tĩnh", "Thanh Hoá", "Ninh Bình", "Hưng Yên", "Bắc Ninh", "Phú Thọ", "Thái Nguyên", "Tuyên Quang", "Lào Cai", "Lạng Sơn", "Cao Bằng", "Điện Biên", "Lai Châu", "Sơn La", "Quảng Ninh"];
+  let cartNotice = "";
 
   function quote(method) {
     const st = subtotal();
@@ -186,9 +198,14 @@
   }
   function renderCheckout() {
     if (lastOrder) return renderDone();
+    if ($("fName")) readForm(); // giữ nguyên những gì khách đang gõ
     const items = Object.entries(cart);
     if (!items.length) {
-      checkoutEl.innerHTML = `<div class="done-box"><h1 class="display">Giỏ hàng đang trống</h1><p class="lead">Chọn sản phẩm trước rồi quay lại thanh toán nhé.</p><p><a class="btn" href="/cua-hang/">Xem sản phẩm</a></p></div>`;
+      const recent = SB ? myOrders()[0] : null;
+      checkoutEl.innerHTML = `<div class="done-box"><h1 class="display">Giỏ hàng đang trống</h1>
+        ${cartNotice ? `<p class="note">${esc(cartNotice)}</p>` : ""}
+        <p class="lead" style="margin:0 auto">Chọn sản phẩm trước rồi quay lại thanh toán nhé.</p>
+        <p style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><a class="btn" href="/cua-hang/">Xem sản phẩm</a>${recent ? `<a class="btn ghost" href="/don-hang/?ma=${encodeURIComponent(recent.code)}">Xem đơn vừa đặt (${esc(recent.code)})</a>` : ""}</p></div>`;
       return;
     }
     const st = subtotal(), phoneBlocked = isBlocked(form.phone), overMax = st > CFG.codMax;
@@ -200,11 +217,13 @@
     <div class="page-head"><h1 class="display">Thanh toán</h1></div>
     <div class="checkout">
       <form id="ckForm" class="panel" novalidate>
+        ${cartNotice ? `<p class="note">${esc(cartNotice)}</p>` : ""}
         <fieldset><legend>Thông tin nhận hàng</legend>
           <label class="f" for="fName">Họ tên<input id="fName" value="${esc(form.name)}" autocomplete="name" placeholder="Nguyễn Thị Lan" required></label>
           <div class="two">
             <label class="f" for="fPhone">Số điện thoại<input id="fPhone" value="${esc(form.phone)}" inputmode="tel" autocomplete="tel" placeholder="09xx xxx xxx" required></label>
-            <label class="f" for="fCity">Tỉnh / thành<select id="fCity">${CITIES.map(c => `<option${c === form.city ? " selected" : ""}>${c}</option>`).join("")}</select></label>
+            <label class="f" for="fCity">Tỉnh / thành phố<input id="fCity" value="${esc(form.city)}" list="cityList" autocomplete="address-level1" placeholder="Gõ hoặc chọn" required></label>
+            <datalist id="cityList">${CITIES.map(c => `<option value="${c}">`).join("")}</datalist>
           </div>
           <label class="f" for="fAddr">Địa chỉ<input id="fAddr" value="${esc(form.addr)}" autocomplete="street-address" placeholder="Số nhà, đường, phường/xã" required></label>
           <label class="f" for="fNote">Ghi chú (không bắt buộc)<input id="fNote" value="${esc(form.note)}" placeholder="Giao giờ hành chính…"></label>
@@ -242,8 +261,9 @@
     COD_OVER_MAX: `Đơn trên ${vnd(CFG.codMax)} chỉ nhận chuyển khoản.`,
     BAD_PHONE: "Số điện thoại chưa đúng (ví dụ 0912345678).",
     BAD_NAME: "Vui lòng nhập họ tên.", BAD_ADDRESS: "Vui lòng nhập địa chỉ đầy đủ.",
-    EMPTY_CART: "Giỏ hàng đang trống.",
+    EMPTY_CART: "Giỏ hàng đang trống.", BAD_QTY: "Mỗi sản phẩm đặt tối đa 20 cái. Cần nhiều hơn vui lòng nhắn Zalo shop.",
     TOO_MANY: "Bạn vừa đặt nhiều đơn liên tiếp. Vui lòng đợi vài phút hoặc nhắn Zalo shop.",
+    BUSY: `Hệ thống đang nhận quá nhiều đơn, vui lòng thử lại sau ít phút hoặc nhắn Zalo ${CFG.zalo}.`,
   };
   async function placeOrder() {
     if (sending) return;
@@ -252,6 +272,7 @@
     if (form.name.length < 2) err.push("Vui lòng nhập họ tên.");
     if (!/^0(3|5|7|8|9)\d{8}$/.test(form.phone)) err.push("Số điện thoại chưa đúng (ví dụ 0912345678).");
     if (form.addr.length < 6) err.push("Vui lòng nhập địa chỉ đầy đủ.");
+    if (form.city.length < 2) err.push("Vui lòng nhập tỉnh/thành phố.");
     if (form.method === "cod" && (isBlocked(form.phone) || subtotal() > CFG.codMax)) { form.method = "bank"; renderCheckout(); $("fErr").textContent = "Đơn này chỉ nhận chuyển khoản, đã chuyển sang hình thức chuyển khoản."; return; }
     if (err.length) { $("fErr").textContent = err.join(" "); return; }
     const items = Object.entries(cart).map(([id, n]) => ({ id: +id, qty: n }));
@@ -268,6 +289,7 @@
         const m = e.message || "";
         if (m === "COD_BLOCKED") blocked[normPhone(form.phone)] = true;
         if (m === "COD_BLOCKED" || m === "COD_OVER_MAX") form.method = "bank";
+        if (m.startsWith("OUT_OF_STOCK") || m.startsWith("PRODUCT_NOT_FOUND")) await syncCart();
         renderCheckout();
         $("fErr").textContent = m.startsWith("OUT_OF_STOCK:") ? `“${m.slice(13)}” vừa hết hàng, vui lòng bỏ khỏi giỏ.`
           : m.startsWith("PRODUCT_NOT_FOUND") ? "Có sản phẩm trong giỏ không còn bán, vui lòng tải lại trang."
@@ -307,6 +329,28 @@
       <p style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">${SB ? `<a class="btn" href="/don-hang/?ma=${encodeURIComponent(o.code)}">Theo dõi đơn hàng</a>` : ""}<a class="btn ghost" href="/cua-hang/">Tiếp tục mua sắm</a></p>
       ${SB ? `<p class="lead" style="margin:0 auto;font-size:13px">Lưu lại mã đơn <strong>${o.code}</strong> để tra cứu sau tại mục “Tra cứu đơn”.</p>` : ""}
     </div>`;
+  }
+
+  // Lấy giá, tồn kho và phí mới nhất từ server để khách thấy đúng số sẽ bị tính
+  async function syncCart() {
+    const ids = Object.keys(cart).filter(id => /^\d+$/.test(id));
+    if (!SB || !ids.length) return;
+    try {
+      const [rows, st] = await Promise.all([rest(`products?id=in.(${ids.join(",")})&select=id,name,price,sale,in_stock`), rest("shop_settings?id=eq.1&select=*")]);
+      const s = st && st[0];
+      if (s) Object.assign(CFG, { shipFee: s.ship_fee, codFee: s.cod_fee, codDepositFrom: s.cod_deposit_from, codDepositRate: Number(s.cod_deposit_rate), codMax: s.cod_max });
+      const gone = [], changed = [];
+      ids.forEach(id => {
+        const p = byId(id), r = rows.find(x => String(x.id) === id);
+        if (!r || !r.in_stock) { gone.push(p.name); delete cart[id]; p.inStock = false; return; }
+        const before = priceOf(p);
+        p.price = r.price; p.sale = r.sale || 0;
+        if (priceOf(p) !== before) changed.push(p.name);
+      });
+      cartNotice = [gone.length ? `${gone.join(", ")} vừa hết hàng nên đã được bỏ khỏi giỏ.` : "", changed.length ? `Giá của ${changed.join(", ")} vừa được cập nhật.` : ""].filter(Boolean).join(" ");
+      if (gone.length) store.set("luna-cart", cart);
+      renderBag();
+    } catch (e) { /* mạng lỗi: vẫn cho đặt, server sẽ tính lại đúng */ }
   }
 
   /* ---------- tra cứu đơn hàng ---------- */
@@ -389,7 +433,7 @@
         ${o.ship ? `<div class="row"><span>Phí giao hàng</span><span>${vnd(o.ship)}</span></div>` : `<div class="row"><span>Phí giao hàng</span><span>Miễn phí</span></div>`}
         ${o.fee ? `<div class="row"><span>Phí thu hộ</span><span>${vnd(o.fee)}</span></div>` : ""}
         <div class="row total"><span>Tổng cộng</span><span>${vnd(o.total)}</span></div>
-        <div class="row"><span>${o.method === "bank" ? "Chuyển khoản" : "COD"}</span><span>${o.paid ? (o.method === "bank" ? "Đã thanh toán" : `Đã cọc ${vnd(o.deposit)}`) : o.method === "cod" ? `Trả khi nhận ${vnd(o.total - (o.paid ? o.deposit : 0))}` : "Chưa thanh toán"}</span></div>
+        <div class="row"><span>${o.method === "bank" ? "Chuyển khoản" : "COD"}</span><span>${o.paid ? (o.method === "bank" ? "Đã thanh toán" : `Đã cọc ${vnd(o.deposit)} · trả khi nhận ${vnd(o.total - o.deposit)}`) : o.method === "cod" ? (o.deposit ? `Chưa cọc ${vnd(o.deposit)}` : `Trả khi nhận ${vnd(o.total)}`) : "Chưa thanh toán"}</span></div>
       </div>
       <p class="lead" style="font-size:13px;margin-top:10px">Giao tới: ${esc(o.buyer_name)}, ${esc(o.address)}${o.city ? ", " + esc(o.city) : ""}</p>
     </div>
@@ -404,11 +448,11 @@
     const d = t.dataset;
     if (d.track) lookup(d.track, d.phone);
     else if (d.add) {
-      add(d.add);
+      if (!add(d.add)) { t.textContent = "Hết hàng"; t.disabled = true; return; }
       t.textContent = "Đã thêm ✓"; t.classList.add("done");
       setTimeout(() => { t.textContent = "Thêm vào giỏ"; t.classList.remove("done"); }, 1100);
-    } else if (d.q) { cart[d.q] = (cart[d.q] || 0) + Number(d.d); if (cart[d.q] <= 0) delete cart[d.q]; save(); }
-    else if (d.step) { pq = Math.max(1, Math.min(20, pq + Number(d.step))); $("pq").textContent = pq; }
+    } else if (d.q) { cart[d.q] = Math.min(MAX_QTY, (cart[d.q] || 0) + Number(d.d)); if (cart[d.q] <= 0) delete cart[d.q]; save(); }
+    else if (d.step) { pq = Math.max(1, Math.min(MAX_QTY, pq + Number(d.step))); $("pq").textContent = pq; }
     else if (d.addQty) { add(d.addQty, pq); openBag(); }
     else if (d.buyNow) { add(d.buyNow, pq); location.href = "/thanh-toan/"; }
     else if (d.copy) {
@@ -434,7 +478,7 @@
     if (shopEl && t.dataset.f) { t.checked ? S.sel[t.dataset.f].add(t.value) : S.sel[t.dataset.f].delete(t.value); renderShop(); }
     if (shopEl && t.id === "sort") { S.sort = t.value; renderShop(); }
     if (checkoutEl && t.name === "pm") { readForm(); form.method = t.value; renderCheckout(); }
-    if (checkoutEl && t.id === "fPhone") { readForm(); if (isBlocked(form.phone) && form.method === "cod") form.method = "bank"; renderCheckout(); checkPhone(form.phone); }
+    if (checkoutEl && t.id === "fPhone") { readForm(); if (isBlocked(form.phone) && form.method === "cod") { form.method = "bank"; renderCheckout(); } checkPhone(form.phone); }
   });
   document.addEventListener("toggle", e => { const g = e.target.dataset && e.target.dataset.g; if (g) e.target.open ? S.open.add(g) : S.open.delete(g); }, true);
   document.addEventListener("submit", e => { if (e.target.id === "ckForm") { e.preventDefault(); placeOrder(); } });
@@ -447,7 +491,7 @@
     qi.closest("form").addEventListener("submit", e => { e.preventDefault(); S.q = qi.value.trim(); renderShop(); });
     qi.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { S.q = qi.value.trim(); renderShop(); }, 150); });
   }
-  if (checkoutEl) { renderCheckout(); checkPhone(form.phone); }
+  if (checkoutEl) { renderCheckout(); checkPhone(form.phone); syncCart().then(() => { if (!lastOrder) renderCheckout(); }); }
   if (trackEl) {
     renderMyOrders();
     $("trackForm").addEventListener("submit", e => { e.preventDefault(); lookup($("tCode").value, $("tPhone").value); });
