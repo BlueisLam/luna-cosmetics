@@ -36,6 +36,20 @@ Trang admin đang mở sẽ tự báo đơn mới (có tiếng). Muốn nhận c
 4. Supabase → **Database → Webhooks → Create a new hook**: bảng `orders`, sự kiện **Insert**, loại **HTTP Request**, method **POST**, URL `https://<web>/.netlify/functions/order-webhook`, thêm header `x-webhook-secret` = chuỗi ở bước 3.
 5. Trigger deploy lại trên Netlify.
 
+### 5. Cập nhật database cho tính năng theo dõi đơn
+Nếu bạn đã chạy `schema.sql` trước khi có tính năng tra cứu đơn: chạy lại **toàn bộ** `supabase/schema.sql` một lần nữa. File chạy lại an toàn, không mất dữ liệu. Không cần chạy lại `seed.sql`.
+
+## Khách theo dõi đơn hàng
+
+- Trang `/don-hang/` (menu "Tra cứu đơn"): khách nhập **mã đơn + số điện thoại đặt hàng**. Phải khớp cả hai mới xem được.
+- Trên máy đã đặt hàng, web nhớ sẵn đơn, khách bấm là xem ngay, không cần gõ lại.
+- Khách thấy: tiến trình 5 bước, lịch sử từng mốc, đơn vị vận chuyển + mã vận đơn + nút xem hành trình, và mã QR để thanh toán lại nếu chưa chuyển khoản.
+- Đơn "Bom hàng" hiện với khách là "Đã huỷ".
+
+Trên admin, mỗi đơn có ô **Đơn vị vận chuyển** và **Mã vận đơn**. Nhập mã vận đơn thì đơn tự chuyển sang "Đang giao". Nút **Chép tin báo khách** chép sẵn tin nhắn có mã vận đơn và link theo dõi để dán vào Zalo.
+
+Link xem hành trình của từng hãng nằm trong `site.json` → `carriers` (`{code}` là chỗ điền mã vận đơn). Hãng nào để `url` trống thì web chỉ hiện mã vận đơn để khách tự tra. Bạn nên bấm thử link của từng hãng sau lần gửi hàng đầu tiên, nếu hãng đổi đường dẫn thì sửa lại trong file này.
+
 ## Trang admin làm được gì
 
 - **Đơn hàng**: lọc theo trạng thái, tìm theo mã/tên/SĐT, đổi trạng thái, đánh dấu đã nhận tiền/cọc, nhắn Zalo, gọi, ghi chú nội bộ. Bấm **Bom hàng** để chặn COD số đó ngay.

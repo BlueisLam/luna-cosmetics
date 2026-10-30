@@ -262,6 +262,7 @@
       try {
         const r = await rpc("place_order", { p_items: items, p_method: form.method, p_name: form.name, p_phone: form.phone, p_address: form.addr, p_city: form.city, p_note: form.note });
         lastOrder = { ...r, buyer, at: new Date().toISOString() };
+        remember(r.code, form.phone);
       } catch (e) {
         sending = false;
         const m = e.message || "";
@@ -303,8 +304,97 @@
       <p class="lead" style="margin:0 auto">${o.method === "cod" ? `Còn lại ${vnd(o.total - o.deposit)} trả khi nhận hàng.` : "Giao 1–3 ngày, miễn phí giao hàng."}</p>`
       : `<p class="lead" style="margin:0 auto">Bạn trả ${vnd(o.total)} khi nhận hàng.</p>`}
       ${o.method === "cod" ? `<div class="note" style="text-align:left"><strong>Đơn COD chỉ được gửi sau khi xác nhận.</strong> Luna sẽ gọi hoặc nhắn Zalo cho bạn trong giờ làm việc. Bạn cũng có thể nhắn Zalo <strong>${esc(CFG.zalo)}</strong><button type="button" class="copy" data-copy="${esc(CFG.zalo.replace(/\s/g, ""))}">Chép</button> kèm mã đơn <strong>${o.code}</strong> để được gửi sớm hơn.</div>` : ""}
-      <p><a class="btn ghost" href="/cua-hang/">Tiếp tục mua sắm</a></p>
+      <p style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">${SB ? `<a class="btn" href="/don-hang/?ma=${encodeURIComponent(o.code)}">Theo dõi đơn hàng</a>` : ""}<a class="btn ghost" href="/cua-hang/">Tiếp tục mua sắm</a></p>
+      ${SB ? `<p class="lead" style="margin:0 auto;font-size:13px">Lưu lại mã đơn <strong>${o.code}</strong> để tra cứu sau tại mục “Tra cứu đơn”.</p>` : ""}
     </div>`;
+  }
+
+  /* ---------- tra cứu đơn hàng ---------- */
+  const trackEl = $("track");
+  const myOrders = () => store.get("luna-my-orders", []);
+  const remember = (code, phone) => store.set("luna-my-orders", [{ code, phone }, ...myOrders().filter(o => o.code !== code)].slice(0, 10));
+  const T_STATUS = {
+    cho_thanh_toan: ["Chờ thanh toán", "wait"], cho_xac_nhan: ["Chờ xác nhận", "wait"], da_xac_nhan: ["Đang đóng gói", "go"],
+    dang_giao: ["Đang giao", "go"], hoan_thanh: ["Đã giao", "done"], da_huy: ["Đã huỷ", "off"],
+  };
+  const T_EVENT = {
+    cho_thanh_toan: "Đặt hàng thành công, chờ thanh toán", cho_xac_nhan: "Đặt hàng thành công, chờ shop xác nhận",
+    da_thanh_toan: "Luna đã nhận thanh toán", da_xac_nhan: "Đơn đã xác nhận, đang đóng gói",
+    dang_giao: "Đã giao cho đơn vị vận chuyển", hoan_thanh: "Giao hàng thành công", da_huy: "Đơn đã huỷ",
+  };
+  const fmtT = t => new Date(t).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" });
+  const carrierOf = id => (CFG.carriers || []).find(c => c.id === id);
+
+  function renderMyOrders() {
+    const list = myOrders();
+    $("myOrders").innerHTML = list.length ? `<div class="my-orders">Đơn đã đặt trên máy này:${list.map(o => `<button type="button" data-track="${esc(o.code)}" data-phone="${esc(o.phone)}">${esc(o.code)}</button>`).join("")}</div>` : "";
+  }
+  async function lookup(code, phone) {
+    code = (code || "").trim().toUpperCase(); phone = normPhone(phone);
+    $("tCode").value = code; $("tPhone").value = phone; $("tErr").textContent = "";
+    if (!/^LUNA\d{6,}$/.test(code)) { $("tErr").textContent = "Mã đơn có dạng LUNA và các chữ số, ví dụ LUNA30101234."; return; }
+    if (!/^0\d{9}$/.test(phone)) { $("tErr").textContent = "Nhập số điện thoại đã dùng khi đặt hàng (10 số)."; return; }
+    if (!SB) { $("tErr").textContent = "Chức năng tra cứu chưa sẵn sàng, vui lòng nhắn Zalo shop."; return; }
+    const box = $("trackResult"); box.innerHTML = `<p class="lead">Đang tìm đơn…</p>`;
+    let o;
+    try { o = await rpc("track_order", { p_code: code, p_phone: phone }); }
+    catch (e) { box.innerHTML = ""; $("tErr").textContent = "Chưa tra cứu được. Kiểm tra mạng rồi thử lại."; return; }
+    if (!o) { box.innerHTML = ""; $("tErr").textContent = "Không tìm thấy đơn. Kiểm tra lại mã đơn và số điện thoại đặt hàng."; return; }
+    remember(o.code, phone); renderMyOrders();
+    box.innerHTML = trackCard(o);
+    box.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  function trackCard(o) {
+    const [label, tone] = T_STATUS[o.status] || [o.status, ""];
+    const cancelled = o.status === "da_huy";
+    const needPay = !o.paid && !cancelled && o.status === "cho_thanh_toan" && (o.method === "bank" || o.deposit > 0);
+    const pay = o.method === "bank" ? o.total : o.deposit;
+    // tiến trình 5 bước
+    const step2 = o.method === "bank" ? "Thanh toán" : o.deposit > 0 ? "Đặt cọc" : "Xác nhận";
+    const at = { cho_thanh_toan: 1, cho_xac_nhan: 1, da_xac_nhan: 2, dang_giao: 3, hoan_thanh: 5 }[o.status] ?? 1;
+    const steps = ["Đặt hàng", step2, "Đóng gói", "Đang giao", "Đã giao"];
+    const msg = {
+      cho_thanh_toan: o.method === "bank" ? "Đơn sẽ được đóng gói ngay khi Luna nhận được chuyển khoản." : `Vui lòng chuyển khoản tiền cọc ${vnd(o.deposit)} để Luna xác nhận đơn.`,
+      cho_xac_nhan: "Luna sẽ gọi hoặc nhắn Zalo cho bạn để xác nhận trước khi gửi hàng.",
+      da_xac_nhan: "Đơn đã được xác nhận và đang đóng gói, thường gửi đi trong ngày.",
+      dang_giao: "Đơn đang trên đường đến bạn, thường mất 1–3 ngày.",
+      hoan_thanh: "Đơn đã giao thành công. Cảm ơn bạn đã mua sắm tại Luna!",
+      da_huy: `Đơn này đã huỷ. Nếu có nhầm lẫn, vui lòng nhắn Zalo ${CFG.zalo}.`,
+    }[o.status] || "";
+    const c = carrierOf(o.carrier), b = CFG.bank;
+    const link = c && c.url && o.tracking_code ? c.url.replace("{code}", encodeURIComponent(o.tracking_code)) : "";
+    const qr = needPay ? `https://img.vietqr.io/image/${b.bin}-${b.acc}-compact2.png?amount=${pay}&addInfo=${encodeURIComponent(o.code)}${b.holder ? `&accountName=${encodeURIComponent(b.holder)}` : ""}` : "";
+    return `<article class="panel t-card">
+  <div class="t-head"><h2>${esc(o.code)}</h2><span class="t-pill ${tone}">${esc(label)}</span></div>
+  <p class="t-msg">${esc(msg)}</p>
+  ${cancelled ? "" : `<ol class="steps">${steps.map((s, i) => `<li class="${i < at || at === 5 ? "done" : i === at ? "now" : ""}">${s}</li>`).join("")}</ol>`}
+  ${needPay ? `<div class="bank">
+    <img class="qr" src="${qr}" alt="Mã QR chuyển khoản ${vnd(pay)}" width="220" height="220">
+    <div class="row"><span>Ngân hàng</span><span>${esc(b.name)}</span></div>
+    <div class="row"><span>Số tài khoản</span><span>${esc(b.acc)}<button type="button" class="copy" data-copy="${esc(b.acc)}">Chép</button></span></div>
+    ${b.holder ? `<div class="row"><span>Chủ tài khoản</span><span>${esc(b.holder)}</span></div>` : ""}
+    <div class="row"><span>Số tiền</span><span>${vnd(pay)}</span></div>
+    <div class="row"><span>Nội dung</span><span>${esc(o.code)}<button type="button" class="copy" data-copy="${esc(o.code)}">Chép</button></span></div>
+  </div>` : ""}
+  ${o.tracking_code ? `<div class="ship-box">
+    <span>Đơn vị vận chuyển: <strong>${esc(c ? c.name : o.carrier || "Đang cập nhật")}</strong></span>
+    <span>Mã vận đơn: <strong>${esc(o.tracking_code)}</strong><button type="button" class="copy" data-copy="${esc(o.tracking_code)}">Chép</button></span>
+    ${link ? `<a class="btn dark" href="${esc(link)}" target="_blank" rel="noopener">Xem hành trình trên ${esc(c.name)}</a>` : ""}
+  </div>` : ""}
+  <div class="t-cols">
+    <div><h3>Lịch sử đơn hàng</h3><ol class="timeline">${(o.events || []).map(e => `<li>${esc(T_EVENT[e.status] || e.status)}<time datetime="${esc(e.at)}">${fmtT(e.at)}</time></li>`).join("")}</ol></div>
+    <div><h3>Sản phẩm</h3>
+      <ul class="t-items">${(o.items || []).map(i => `<li><span>${i.qty} × ${esc(i.name)}</span><span>${vnd(i.price * i.qty)}</span></li>`).join("")}</ul>
+      <div class="df" style="padding:12px 0 0;background:none">
+        ${o.ship ? `<div class="row"><span>Phí giao hàng</span><span>${vnd(o.ship)}</span></div>` : `<div class="row"><span>Phí giao hàng</span><span>Miễn phí</span></div>`}
+        ${o.fee ? `<div class="row"><span>Phí thu hộ</span><span>${vnd(o.fee)}</span></div>` : ""}
+        <div class="row total"><span>Tổng cộng</span><span>${vnd(o.total)}</span></div>
+        <div class="row"><span>${o.method === "bank" ? "Chuyển khoản" : "COD"}</span><span>${o.paid ? (o.method === "bank" ? "Đã thanh toán" : `Đã cọc ${vnd(o.deposit)}`) : o.method === "cod" ? `Trả khi nhận ${vnd(o.total - (o.paid ? o.deposit : 0))}` : "Chưa thanh toán"}</span></div>
+      </div>
+      <p class="lead" style="font-size:13px;margin-top:10px">Giao tới: ${esc(o.buyer_name)}, ${esc(o.address)}${o.city ? ", " + esc(o.city) : ""}</p>
+    </div>
+  </div>
+</article>`;
   }
 
   /* ---------- sự kiện ---------- */
@@ -312,7 +402,8 @@
     const t = e.target.closest("button,a");
     if (!t) return;
     const d = t.dataset;
-    if (d.add) {
+    if (d.track) lookup(d.track, d.phone);
+    else if (d.add) {
       add(d.add);
       t.textContent = "Đã thêm ✓"; t.classList.add("done");
       setTimeout(() => { t.textContent = "Thêm vào giỏ"; t.classList.remove("done"); }, 1100);
@@ -357,4 +448,14 @@
     qi.addEventListener("input", () => { clearTimeout(qt); qt = setTimeout(() => { S.q = qi.value.trim(); renderShop(); }, 150); });
   }
   if (checkoutEl) { renderCheckout(); checkPhone(form.phone); }
+  if (trackEl) {
+    renderMyOrders();
+    $("trackForm").addEventListener("submit", e => { e.preventDefault(); lookup($("tCode").value, $("tPhone").value); });
+    const ma = new URLSearchParams(location.search).get("ma");
+    if (ma) {
+      const known = myOrders().find(o => o.code === ma.toUpperCase());
+      $("tCode").value = ma.toUpperCase();
+      if (known) lookup(known.code, known.phone); else $("tPhone").focus();
+    }
+  }
 })();

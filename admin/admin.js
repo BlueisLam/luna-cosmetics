@@ -110,6 +110,13 @@
     <a href="tel:${esc(o.phone)}">Gọi</a>
     ${o.method === "cod" && o.status !== "bom_hang" ? `<button type="button" class="sm bomb" data-bomb="${o.id}">Bom hàng</button>` : ""}
   </div>
+  <div class="o-ship">
+    <label class="sr" for="cr${o.id}">Đơn vị vận chuyển</label>
+    <select id="cr${o.id}" data-carrier="${o.id}"><option value="">Đơn vị vận chuyển…</option>${(CFG.carriers || []).map(c => `<option value="${esc(c.id)}"${c.id === o.carrier ? " selected" : ""}>${esc(c.name)}</option>`).join("")}</select>
+    <label class="sr" for="tc${o.id}">Mã vận đơn</label>
+    <input id="tc${o.id}" data-tcode="${o.id}" value="${esc(o.tracking_code || "")}" placeholder="Mã vận đơn" autocomplete="off">
+    <button type="button" class="sm" data-msg="${o.id}">Chép tin báo khách</button>
+  </div>
   ${bombing === o.id ? `<div class="confirm">Đánh dấu đơn ${esc(o.code)} là bom hàng và chặn COD số ${esc(o.phone)}? Khách vẫn đặt được nếu chuyển khoản trước.
     <div class="e-actions"><button type="button" class="btn danger sm" data-bomb-yes="${o.id}">Bom hàng & chặn COD</button><button type="button" class="btn ghost sm" data-bomb-no>Huỷ</button></div></div>` : ""}
   <label class="sr" for="an${o.id}">Ghi chú nội bộ</label>
@@ -317,6 +324,16 @@
     if (d.view) show(d.view);
     else if (d.of) { oFilter = d.of; renderOrders(); }
     else if (d.copy) { navigator.clipboard?.writeText(d.copy).then(() => toast(`Đã chép ${d.copy}`)).catch(() => toast(d.copy)); }
+    else if (d.msg) {
+      const o = orders.find(x => x.id === Number(d.msg));
+      const link = `${(CFG.site || location.origin).replace(/\/$/, "")}/don-hang/?ma=${o.code}`;
+      const c = (CFG.carriers || []).find(x => x.id === o.carrier);
+      const shop = CFG.shopName || "Luna Cosmetics";
+      const text = o.tracking_code
+        ? `${shop}: Đơn ${o.code} của bạn đã được gửi${c ? ` qua ${c.name}` : ""}, mã vận đơn ${o.tracking_code}. Theo dõi đơn: ${link} (nhập số điện thoại đặt hàng).`
+        : `${shop}: Cảm ơn bạn đã đặt đơn ${o.code}. Bạn theo dõi trạng thái đơn tại ${link} (nhập số điện thoại đặt hàng).`;
+      navigator.clipboard?.writeText(text).then(() => toast("Đã chép tin nhắn, dán vào Zalo cho khách")).catch(() => toast(text));
+    }
     else if (d.bomb) { bombing = Number(d.bomb); renderOrders(); }
     else if ("bombNo" in d) { bombing = null; renderOrders(); }
     else if (d.bombYes) {
@@ -351,6 +368,13 @@
       updateOrder(o.id, patch, t.checked ? "Đã ghi nhận thanh toán" : "Đã bỏ đánh dấu thanh toán");
     }
     else if (d.anote) updateOrder(Number(d.anote), { admin_note: t.value }, "Đã lưu ghi chú");
+    else if (d.carrier) updateOrder(Number(d.carrier), { carrier: t.value }, "Đã lưu đơn vị vận chuyển");
+    else if (d.tcode) {
+      const o = orders.find(x => x.id === Number(d.tcode)), code = t.value.trim();
+      const patch = { tracking_code: code };
+      if (code && ["cho_xac_nhan", "da_xac_nhan"].includes(o.status)) patch.status = "dang_giao";
+      updateOrder(o.id, patch, patch.status ? "Đã lưu mã vận đơn, chuyển sang “Đang giao”" : "Đã lưu mã vận đơn");
+    }
     else if (t.id === "e_upload") upload(t.files);
   });
   $("eForm").addEventListener("submit", e => { e.preventDefault(); saveProduct(); });

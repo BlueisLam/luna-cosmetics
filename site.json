@@ -27,5 +27,47 @@
     "url": "https://aawhgpfmbkjytjuuygwa.supabase.co",
     "anonKey": "sb_publishable_M4o70it4x_NbAcD-3Jd3Og_Lb_KYlAG"
   },
-  "_ghichu": "supabase.url và supabase.anonKey: lấy ở Supabase → Project Settings → API. Phí ship, cọc COD… khi đã nối Supabase thì sửa trên trang admin (mục Cài đặt), số trong file này chỉ dùng khi chưa nối."
+  "_ghichu": "supabase.url và supabase.anonKey: lấy ở Supabase → Project Settings → API. Phí ship, cọc COD… khi đã nối Supabase thì sửa trên trang admin (mục Cài đặt), số trong file này chỉ dùng khi chưa nối.",
+  "carriers": [
+    {
+      "id": "ghn",
+      "name": "Giao Hàng Nhanh (GHN)",
+      "url": "https://donhang.ghn.vn/?order_code={code}"
+    },
+    {
+      "id": "ghtk",
+      "name": "Giao Hàng Tiết Kiệm (GHTK)",
+      "url": "https://i.ghtk.vn/{code}"
+    },
+    {
+      "id": "jt",
+      "name": "J&T Express",
+      "url": "https://jtexpress.vn/vi/tracking?type=track&billcode={code}"
+    },
+    {
+      "id": "spx",
+      "name": "SPX Express",
+      "url": "https://spx.vn/track?{code}"
+    },
+    {
+      "id": "vtp",
+      "name": "Viettel Post",
+      "url": ""
+    },
+    {
+      "id": "vnpost",
+      "name": "VNPost",
+      "url": ""
+    },
+    {
+      "id": "grab",
+      "name": "Grab / Ahamove (nội thành)",
+      "url": ""
+    },
+    {
+      "id": "other",
+      "name": "Khác",
+      "url": ""
+    }
+  ]
 }

@@ -93,7 +93,7 @@ function layout({ title, desc, url, body, ld = [], noindex = false, image, nav }
   const full = title === SITE.name ? `${SITE.name} – ${SITE.tagline} chính hãng` : `${title} | ${SITE.name}`;
   const navLinks = [
     ["/skincare/", "Skincare"], ["/makeup/", "Makeup"], ["/nhu-cau/", "Theo nhu cầu"], ["/thuong-hieu/", "Thương hiệu"],
-    ["/hang-moi-ve/", "Hàng mới về"], ["/ban-chay/", "Bán chạy"], ["/khuyen-mai/", "Khuyến mãi", "sale"], ["/cua-hang/", "Tất cả sản phẩm"],
+    ["/hang-moi-ve/", "Hàng mới về"], ["/ban-chay/", "Bán chạy"], ["/khuyen-mai/", "Khuyến mãi", "sale"], ["/cua-hang/", "Tất cả sản phẩm"], ["/don-hang/", "Tra cứu đơn"],
   ];
   return `<!doctype html>
 <html lang="vi">
@@ -157,6 +157,7 @@ ${body}
       <li>Hotline / Zalo: ${esc(SITE.phone)}</li>
       <li>${esc(SITE.email)}</li>
       <li>${esc(SITE.address)}</li>
+      <li><a href="/don-hang/">Tra cứu đơn hàng</a></li>
       <li><a href="/lien-he/">Trang liên hệ</a></li>
       ${SITE.facebook ? `<li><a href="${esc(SITE.facebook)}" rel="noopener">Facebook</a></li>` : ""}
       ${SITE.tiktok ? `<li><a href="${esc(SITE.tiktok)}" rel="noopener">TikTok</a></li>` : ""}
@@ -384,6 +385,29 @@ for (const p of P) {
   write(p.url, layout({ title, desc, url: p.url, body, ld: [bc.ld, product], image: p.images[0] }), { priority: 0.9 });
 }
 
+/* Tra cứu đơn hàng (không đưa lên Google) */
+{
+  const bc = crumbs([HOME, { name: "Tra cứu đơn hàng", url: "/don-hang/" }]);
+  write("/don-hang/", layout({ title: "Tra cứu đơn hàng", desc: `Theo dõi trạng thái đơn hàng ${SITE.name} bằng mã đơn và số điện thoại.`, url: "/don-hang/", noindex: true, nav: "/don-hang/", ld: [bc.ld],
+    body: `<div class="wrap" id="track">${bc.html}
+  <header class="page-head"><h1 class="display">Tra cứu đơn hàng</h1>
+    <p class="lead">Nhập mã đơn (bắt đầu bằng LUNA, có trong màn hình đặt hàng thành công và tin nhắn của shop) cùng số điện thoại đặt hàng.</p></header>
+  <div class="track-wrap">
+    <form class="panel track-form" id="trackForm" novalidate>
+      <div class="two">
+        <label class="f" for="tCode">Mã đơn<input id="tCode" placeholder="LUNA30101234" autocomplete="off" autocapitalize="characters" required></label>
+        <label class="f" for="tPhone">Số điện thoại<input id="tPhone" inputmode="tel" autocomplete="tel" placeholder="09xx xxx xxx" required></label>
+      </div>
+      <p class="err" id="tErr" role="alert"></p>
+      <button class="btn" type="submit">Tra cứu</button>
+    </form>
+    <div id="myOrders"></div>
+    <div id="trackResult" aria-live="polite"></div>
+  </div>
+  <p class="lead">Cần hỗ trợ? Nhắn Zalo ${esc(SITE.zalo)} kèm mã đơn.</p>
+</div>` }), { sitemap: false });
+}
+
 /* Thanh toán (không đưa lên Google) */
 write("/thanh-toan/", layout({ title: "Thanh toán", desc: "Thanh toán đơn hàng Luna Cosmetics.", url: "/thanh-toan/", noindex: true,
   body: `<div class="wrap" id="checkout"><div class="page-head"><h1 class="display">Thanh toán</h1></div><p class="lead">Đang tải giỏ hàng…</p></div>` }), { sitemap: false });
@@ -417,7 +441,7 @@ write("/404.html", layout({ title: "Không tìm thấy trang", desc: "Trang khô
 fs.mkdirSync(path.join(OUT, "assets"), { recursive: true });
 const pub = P.map(p => ({ id: p.id, cat: p.cat, sub: p.sub, brand: p.brand, origin: p.origin, name: p.name, vol: p.vol, price: p.price, sale: p.sale || 0,
   isNew: !!p.isNew, pop: p.pop, actives: p.actives, skin: p.skin, concerns: p.concerns, url: p.url, img: p.images[0] || "", shape: p.shape, tint: p.tint, inStock: p.inStock }));
-const cfg = { ...SITE.order, zalo: SITE.zalo, shopName: SITE.name, supabase: SB.url && SB.anonKey ? SB : null };
+const cfg = { ...SITE.order, zalo: SITE.zalo, shopName: SITE.name, carriers: SITE.carriers || [], supabase: SB.url && SB.anonKey ? SB : null };
 fs.writeFileSync(path.join(OUT, "assets/data.js"),
   `window.LUNA=${JSON.stringify({ products: pub, cfg, needs: T.needs.map(n => ({ name: n.name, hint: n.hint })), art: ACCENT })};`);
 for (const f of fs.readdirSync(path.join(ROOT, "assets"))) fs.copyFileSync(path.join(ROOT, "assets", f), path.join(OUT, "assets", f));
@@ -434,7 +458,7 @@ fs.writeFileSync(path.join(OUT, "robots.txt"), `User-agent: *\nAllow: /\nDisallo
 /* Trang admin */
 fs.mkdirSync(path.join(OUT, "admin"), { recursive: true });
 fs.writeFileSync(path.join(OUT, "admin/index.html"), fs.readFileSync(path.join(ROOT, "admin/index.html"), "utf8")
-  .replace("__ADMIN_CONFIG__", JSON.stringify({ supabase: SB.url && SB.anonKey ? SB : null, site: SITE.url, taxonomy: { needs: T.needs.map(n => n.name), subs: Object.keys(T.subs) } }).replace(/</g, "\\u003c")));
+  .replace("__ADMIN_CONFIG__", JSON.stringify({ supabase: SB.url && SB.anonKey ? SB : null, site: SITE.url, shopName: SITE.name, carriers: SITE.carriers || [], taxonomy: { needs: T.needs.map(n => n.name), subs: Object.keys(T.subs) } }).replace(/</g, "\\u003c")));
 fs.copyFileSync(path.join(ROOT, "admin/admin.js"), path.join(OUT, "admin/admin.js"));
 fs.copyFileSync(path.join(ROOT, "admin/admin.css"), path.join(OUT, "admin/admin.css"));
 
