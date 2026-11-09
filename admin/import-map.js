@@ -31,8 +31,8 @@
   const SUB_RULES = [
     ["Bộ sản phẩm", "skincare", ["bo doi", "bo ba", "bo tu", "bo san pham", "combo", "set qua", "gift set", "duo", "trio", "kit"]],
     ["Chống nắng", "skincare", ["chong nang", "sunscreen", "sunshield", "sun shield", "sunblock", "spf"]],
-    ["Làm sạch", "skincare", ["sua rua mat", "rua mat", "tay trang", "cleanser", "cleansing", "foaming gel", "micellar", "gel rua"]],
-    ["Toner", "skincare", ["toner", "nuoc can bang", "nuoc hoa hong", "lotion can bang"]],
+    ["Làm sạch", "skincare", ["sua rua mat", "rua mat", "tay trang", "cleanser", "cleansing", "foaming gel", "micellar", "gel rua", "nuoc tay trang", "sua tam", "dau tam", "gel tam", "gel moussant", "moussant", "gel douche", "huile de douche", "body wash", "shower", "h2o", "lingettes", "wipes", "makeup remover"]],
+    ["Toner", "skincare", ["toner", "nuoc can bang", "nuoc hoa hong", "lotion can bang", "tonique", "tonic"]],
     ["Mặt nạ", "skincare", ["mat na", "mask", "masque"]],
     ["Tẩy tế bào chết", "skincare", ["peel", "pad", "pads", "tay te bao", "tay da chet", "exfoliant", "exfoliating", "scrub"]],
     ["Serum", "skincare", ["serum", "tinh chat", "essence", "ampoule", "concentrate", "booster", "treatment"]],
