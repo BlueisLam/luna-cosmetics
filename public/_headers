@@ -1,0 +1,12 @@
+# Cloudflare Pages: header cho file tĩnh
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# Code CSS/JS luôn kiểm tra bản mới (link đã gắn ?v=<phiên bản>)
+/assets/*
+  Cache-Control: public, max-age=0, must-revalidate
+
+/admin/*
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-cache

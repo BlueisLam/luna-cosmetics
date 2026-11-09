@@ -571,7 +571,7 @@
     const btn = $("rebuildBtn"); btn.disabled = true; btn.textContent = "Đang gửi…";
     try {
       const { data: { session } } = await sb.auth.getSession();
-      const r = await fetch("/.netlify/functions/rebuild", { method: "POST", headers: { Authorization: `Bearer ${session.access_token}` } });
+      const r = await fetch("/api/rebuild", { method: "POST", headers: { Authorization: `Bearer ${session.access_token}` } });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
       needRebuild(false); toast("Đang cập nhật web. Khoảng 1–2 phút nữa khách sẽ thấy thay đổi.");

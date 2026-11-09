@@ -6,6 +6,7 @@ const path = require("path");
 const ROOT = __dirname;
 const OUT = path.join(ROOT, "dist");
 const SITE = JSON.parse(fs.readFileSync(path.join(ROOT, "site.json"), "utf8"));
+if (process.env.SITE_URL) SITE.url = process.env.SITE_URL; // đổi tên miền không cần sửa code
 const CACHE = path.join(ROOT, ".cache");
 const fromDB = fs.existsSync(path.join(CACHE, "products.json"));
 const P = JSON.parse(fs.readFileSync(fromDB ? path.join(CACHE, "products.json") : path.join(ROOT, "data/products.json"), "utf8"));

@@ -1,6 +1,19 @@
 # Luna Cosmetics
 
-Web bán skincare & makeup cao cấp. Web tĩnh nhiều trang chuẩn SEO trên Netlify, đơn hàng và sản phẩm lưu trên Supabase, quản lý tại `/admin/`.
+Web bán skincare & makeup cao cấp. Web tĩnh nhiều trang chuẩn SEO trên Cloudflare Pages, đơn hàng và sản phẩm lưu trên Supabase, quản lý tại `/admin/`.
+
+## Đưa web lên Cloudflare Pages (làm 1 lần)
+
+1. Vào **dash.cloudflare.com** → **Workers & Pages** → **Create** → tab **Pages** → **Connect to Git** → chọn GitHub, repo `luna-cosmetics`.
+2. Cấu hình build:
+   - Production branch: `main`
+   - Framework preset: **None**
+   - Build command: `node scripts/fetch-data.js && node build.js`
+   - Build output directory: `dist`
+3. **Save and Deploy**. Khoảng 1–2 phút sau có link dạng `https://<tên-project>.pages.dev`.
+4. Nếu link không phải `https://luna-cosmetics.pages.dev`: vào **Settings → Variables and Secrets** thêm biến `SITE_URL` = link của bạn (không có dấu `/` cuối), rồi **Deployments → ⋯ → Retry deployment**.
+
+Lưu ý Cloudflare: thêm hoặc đổi biến môi trường xong phải **Retry deployment** thì mới có hiệu lực.
 
 ## Cài đặt Supabase (làm 1 lần)
 
@@ -21,20 +34,20 @@ Trang admin: `https://<web>/admin/`
 
 ### 3. Nút "Cập nhật web" trên admin
 Sửa sản phẩm trên admin xong, web cần build lại để khách thấy.
-1. Netlify → **Site configuration → Build & deploy → Build hooks → Add build hook**, tên `Admin`, nhánh `main` → copy link.
-2. Netlify → **Site configuration → Environment variables → Add**: `BUILD_HOOK_URL` = link vừa copy.
-3. **Deploys → Trigger deploy → Deploy site** một lần để áp dụng.
+1. Cloudflare → project → **Settings → Builds → Deploy hooks → Add deploy hook**, tên `Admin`, nhánh `main` → copy link.
+2. **Settings → Variables and Secrets → Add**: loại **Secret**, tên `BUILD_HOOK_URL`, giá trị = link vừa copy.
+3. **Deployments → ⋯ → Retry deployment** ở bản mới nhất để áp dụng.
 
 ### 4. Báo đơn mới qua Telegram (không bắt buộc)
 Trang admin đang mở sẽ tự báo đơn mới (có tiếng). Muốn nhận cả khi không mở admin:
 1. Telegram: nhắn **@BotFather** → `/newbot` → lấy **token**.
 2. Nhắn một tin bất kỳ cho bot vừa tạo, rồi mở `https://api.telegram.org/bot<TOKEN>/getUpdates` → tìm `"chat":{"id":...}` → đó là **chat id**.
-3. Netlify → Environment variables, thêm:
+3. Cloudflare → **Settings → Variables and Secrets**, thêm (loại Secret):
    - `TELEGRAM_BOT_TOKEN` = token
    - `TELEGRAM_CHAT_ID` = chat id
    - `WEBHOOK_SECRET` = một chuỗi ngẫu nhiên tự đặt (ví dụ `luna-8f3k2m9x`)
-4. Supabase → **Database → Webhooks → Create a new hook**: bảng `orders`, sự kiện **Insert**, loại **HTTP Request**, method **POST**, URL `https://<web>/.netlify/functions/order-webhook`, thêm header `x-webhook-secret` = chuỗi ở bước 3.
-5. Trigger deploy lại trên Netlify.
+4. Supabase → **Database → Webhooks → Create a new hook**: bảng `orders`, sự kiện **Insert**, loại **HTTP Request**, method **POST**, URL `https://<web>/api/order-webhook`, thêm header `x-webhook-secret` = chuỗi ở bước 3.
+5. **Retry deployment** trên Cloudflare.
 
 ### 5. Cập nhật database cho tính năng theo dõi đơn
 Nếu bạn đã chạy `schema.sql` trước khi có tính năng tra cứu đơn: chạy lại **toàn bộ** `supabase/schema.sql` một lần nữa. File chạy lại an toàn, không mất dữ liệu. Không cần chạy lại `seed.sql`.
@@ -92,7 +105,8 @@ Trạng thái đơn: Chờ thanh toán (chuyển khoản, hoặc COD cần cọc
 | `site.json` | Thông tin shop, tên miền, Zalo, **số tài khoản ngân hàng**, khoá Supabase |
 | `supabase/` | `schema.sql` (bảng, bảo mật, hàm đặt hàng), `seed.sql` (sản phẩm mẫu) |
 | `admin/` | Trang quản lý |
-| `netlify/functions/` | `rebuild` (nút Cập nhật web), `order-webhook` (báo Telegram) |
+| `functions/api/` | Cloudflare Pages Functions: `rebuild` (nút Cập nhật web), `order-webhook` (báo Telegram) |
+| `public/_headers` | Header bảo mật và chống cache code cũ |
 | `data/products.json` | Sản phẩm dự phòng khi chưa nối Supabase |
 | `data/taxonomy.json` | Mô tả danh mục, nhu cầu da, hoạt chất, nội dung trang chính sách |
 | `assets/` | Giao diện và giỏ hàng, bộ lọc, thanh toán |
@@ -105,8 +119,8 @@ Trạng thái đơn: Chờ thanh toán (chuyển khoản, hoặc COD cần cọc
 
 ## Khi mua tên miền
 
-1. Sửa `"url"` trong `site.json`, đẩy lên GitHub.
-2. Netlify → Domain management → Add domain, làm theo hướng dẫn trỏ DNS.
+1. Cloudflare → project → **Custom domains → Set up a custom domain**, nhập tên miền và làm theo hướng dẫn (tên miền quản lý trên Cloudflare thì tự động trỏ).
+2. Đổi biến `SITE_URL` (hoặc `"url"` trong `site.json`) thành tên miền mới, rồi Retry deployment.
 3. Supabase → Authentication → URL Configuration: đổi Site URL sang tên miền mới.
 4. Google Search Console → gửi `https://<tên-miền>/sitemap.xml`. Google Merchant Center để hiện ở tab Mua sắm.
 
