@@ -171,9 +171,15 @@
       if (!lines.length) return;
       if (!res.howto && H_HOWTO.test(n)) res.howto = capLines(lines, 1500);
       else if (!res.ingredients && H_INGR.test(n)) res.ingredients = capLines(lines, 2500);
-      else if (H_DESC.test(n) && descParts.length < 3) descParts.push(...lines);
+      else if (H_DESC.test(n)) descParts.push({ rank: /^cong dung/.test(n) ? 1 : 0, lines });
     });
-    res.desc = capLines(descParts, 2500);
+    // không có tab mô tả: lấy khối có tiêu đề "Thông tin sản phẩm" / "Mô tả"
+    if (!descParts.some(p => p.rank === 0)) {
+      const hd = [...d.querySelectorAll("h2,h3,h4,.title,[class*=title]")].find(h => h.textContent.length < 50 && /^(thong tin san pham|mo ta san pham|mo ta|chi tiet san pham|product details|description)$/.test(norm(h.textContent.trim().replace(/[:\s]+$/, ""))));
+      if (hd && hd.parentElement) { const box = hd.parentElement.cloneNode(true); [...box.children].forEach(c => { if (c.textContent.trim() === hd.textContent.trim()) c.remove(); }); const lines = textLines(box.innerHTML); if (lines.length) descParts.push({ rank: 0, lines }); }
+    }
+    descParts.sort((a, b) => a.rank - b.rank);
+    res.desc = capLines(descParts.slice(0, 2).flatMap(p => p.lines), 2500);
     // 2) quét chữ trên trang: dòng tiêu đề "Hướng dẫn sử dụng" / "Thành phần" và các dòng sau nó
     if (!res.howto || !res.ingredients) {
       const main = d.querySelector("main") || d.body;
@@ -268,6 +274,9 @@
   const moneyOf = t => { const m = MONEY.exec(t || ""); return m ? Number(m[1].replace(/[.,]/g, "")) : 0; };
   const JUNK = "[class*=related],[class*=top-product],[class*=suggest],[class*=recommend],[class*=upsell],[class*=cross-sell],[class*=recent],[class*=footer],[class*=header],[class*=menu],[class*=navbar],[class*=logo],[class*=banner],[class*=blog],[class*=popup],[class*=cart],footer,header,nav";
   const imgSrc = i => { const ss = (i.getAttribute("srcset") || i.getAttribute("data-srcset") || "").split(",").map(x => x.trim().split(" ")[0]).filter(Boolean); return i.getAttribute("data-src") || i.getAttribute("data-lazy-src") || i.getAttribute("data-original") || i.getAttribute("data-zoom-image") || ss[ss.length - 1] || i.getAttribute("src") || ""; };
+  // cùng một ảnh nhưng khác cỡ (Drupal /styles/x/public/, ?itok=, -300x300) chỉ lấy 1
+  const imgKey = u => u.replace(/\/styles\/[^/]+\/public\//, "/").replace(/[?#].*$/, "").replace(/-\d{2,4}x\d{2,4}(?=\.\w+$)/, "").toLowerCase();
+  const uniqImg = list => { const seen = new Set(); return list.filter(u => { const k = imgKey(u); if (!u || seen.has(k)) return false; seen.add(k); return true; }); };
   function fromGenericPage(html, pageUrl) {
     const d = new DOMParser().parseFromString(String(html || ""), "text/html");
     const meta = p => ((d.querySelector(`meta[property="${p}"],meta[name="${p}"]`) || {}).content || "").trim();
@@ -304,16 +313,17 @@
       key: `page-${pageUrl}`, sourceUrl: pageUrl, name, vendor: meta("product:brand") || cleanBrand(siteName),
       vol: (sizeEl && findSize(sizeEl.textContent.trim())) || findSize(name) || labeledSize(scope.innerHTML),
       price: oldP > nowP ? oldP : nowP, salePrice: oldP > nowP ? nowP : 0,
-      images: uniq(imgs).slice(0, 6), html: out, extra: { howto: x.howto, ingredients: x.ingredients },
+      images: uniqImg(imgs).slice(0, 6), html: out, extra: { howto: x.howto, ingredients: x.ingredients },
       sku: "", available: !/hết hàng|het hang|out of stock|tạm hết|ngừng kinh doanh/i.test(scope.textContent.slice(0, 3000)), type: "", tags: [],
     }];
   }
   // Trang sản phẩm: JSON-LD trước, không có thì đoán từ HTML (cần có giá)
-  function fromPage(html, pageUrl) {
+  // noPrice: trang lấy từ sitemap / danh sách → nhận cả trang không ghi giá (web giới thiệu của hãng), nếu trông giống trang sản phẩm
+  function fromPage(html, pageUrl, noPrice) {
     const ld = fromHtml(html, pageUrl, true);
     if (ld.length) return ld;
     const g = fromGenericPage(html, pageUrl);
-    return g.filter(x => x.price > 0);
+    return g.filter(x => x.price > 0 || (noPrice && x.images.length && (x.extra.howto || x.extra.ingredients)));
   }
   // Link sản phẩm trên trang danh sách: link nằm trong "thẻ" có ảnh và giá
   const SKIP_PATH = /^\/(cart|gio-hang|account|tai-khoan|login|dang-nhap|register|blog|tin-tuc|news|tag|tags|search|tim-kiem|page|pages|lien-he|contact|chinh-sach|policy|collections|danh-muc|category|categories)(\/|$)/i;
@@ -337,7 +347,9 @@
     const prefix = here.pathname.replace(/\/+$/, "");
     const same = urls.filter(u => { try { return new URL(u).host === here.host; } catch (e) { return false; } });
     const under = prefix ? same.filter(u => new URL(u).pathname.startsWith(prefix + "/")) : [];
-    if (under.length) return uniq(under);
+    // bỏ trang danh mục: link là "cha" của link khác (vd /san-pham/atoderm khi có /san-pham/atoderm/gel-douche)
+    const dropParents = list => { const set = list.map(u => new URL(u).pathname.replace(/\/+$/, "")); return list.filter((u, i) => !set.some((p, j) => j !== i && p.startsWith(set[i] + "/"))); };
+    if (under.length) return uniq(dropParents(under));
     return uniq(same.filter(u => /\/(products?|san-pham|sp|p|item|shop)\/[^/]+\/?$/i.test(new URL(u).pathname)));
   }
 
