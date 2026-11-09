@@ -359,7 +359,7 @@
     const o = new URL(pageUrl).origin, seen = new Set(), urls = [];
     let maps = [];
     try { const t = await (await proxy(`${o}/robots.txt`)).text(); maps = [...t.matchAll(/^\s*sitemap:\s*(\S+)/gim)].map(m => m[1]); } catch (e) {}
-    if (!maps.length) maps = [`${o}/sitemap.xml`];
+    if (!maps.includes(`${o}/sitemap.xml`)) maps.push(`${o}/sitemap.xml`);
     iStatus("Đang tìm sản phẩm trong sitemap…");
     for (let i = 0; i < maps.length && seen.size < 12; i++) {
       const m = maps[i]; if (seen.has(m)) continue; seen.add(m);
@@ -372,19 +372,26 @@
     }
     return LI.filterSitemap(urls, pageUrl);
   }
-  // Đọc từng trang sản phẩm (3 trang cùng lúc)
-  async function readPages(links) {
-    const out = []; let i = 0, done = 0; readPages.skipped = 0;
+  // Đọc từng trang: trang sản phẩm thì lấy, trang danh mục thì đi tiếp vào link bên dưới (tối đa 300 trang)
+  async function crawl(seeds, base) {
+    const prefix = LI.listPrefix(base), queue = [...new Set(seeds)], seen = new Set(queue), out = [], order = [];
+    let active = 0, pages = 0;
     const work = async () => {
-      while (i < links.length) {
-        const u = links[i++];
-        try { const r = await proxy(u); const got = LI.fromPage(await r.text(), r.headers.get("X-Final-Url") || u); if (!got.length) readPages.skipped++; out.push(...got); } catch (e) { if (e.status === 401) throw e; readPages.skipped++; }
-        iStatus(`Đang đọc ${++done}/${links.length} sản phẩm…`);
+      while (queue.length || active) {
+        if (!queue.length || pages >= 300) { if (!active || pages >= 300) return; await new Promise(r => setTimeout(r, 150)); continue; }
+        const u = queue.shift(); active++; pages++;
+        try {
+          const r = await proxy(u), html = await r.text(), fin = r.headers.get("X-Final-Url") || u;
+          const got = LI.fromPage(html, fin, true);
+          if (got.length) { got.forEach(x => { if (!out.some(y => y.sourceUrl === x.sourceUrl && y.name === x.name)) { out.push(x); order.push(u); } }); }
+          else LI.linksUnder(html, fin, prefix).forEach(l => { if (!seen.has(l)) { seen.add(l); queue.push(l); } });
+        } catch (e) { if (e.status === 401) { queue.length = 0; active--; throw e; } }
+        active--;
+        iStatus(`Đã xem ${pages} trang, tìm thấy ${out.length} sản phẩm…`);
       }
     };
-    await Promise.all([work(), work(), work()]);
-    const order = new Map(links.map((u, k) => [u, k]));
-    return out.sort((a, b) => (order.get(a.sourceUrl) ?? 0) - (order.get(b.sourceUrl) ?? 0));
+    await Promise.all([work(), work(), work(), work()]);
+    return out;
   }
 
   async function loadSource(input) {
@@ -419,10 +426,11 @@
           const items = LI.fromPage(html, final);
           let links = LI.productLinks(html, final);
           if (items.length && links.length < 4) return { platform: "Trang sản phẩm", items };
-          if (links.length < 2) links = await sitemapProducts(final);
+          if (links.length < 2) links = [...await sitemapProducts(final), ...LI.linksUnder(html, final, LI.listPrefix(final))];
           if (links.length) {
-            const got = await readPages(links.slice(0, 300));
-            if (got.length) return { platform: `Web riêng của hãng${readPages.skipped ? ` · bỏ qua ${readPages.skipped} trang không có giá bán` : ""}`, items: got };
+            const got = await crawl(links, final);
+            const noPrice = got.filter(x => !x.price).length;
+            if (got.length) return { platform: `Web riêng của hãng${noPrice ? ` · ${noPrice} sản phẩm hãng không ghi giá (nhập giá bán để chọn)` : ""}`, items: got };
           }
           if (items.length) return { platform: "Trang sản phẩm", items };
         }
@@ -472,7 +480,7 @@
       items.filter(it => it.name && !seen.has(it.key) && seen.add(it.key)).forEach(it => { const k = it.group || it.key; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(it); });
       imp.rows = [...groups.values()].map(g => {
         const it = g[0], { sub } = LI.pickSub(it.name, it.type, it.tags), dup = have.has(LI.norm(it.name));
-        return { item: it, variants: g.slice(1), name: it.name, vol: it.label || it.vol || "", sub, dup, sel: !dup && it.price > 0 };
+        return { item: it, variants: g.slice(1), name: it.name, vol: it.label || it.vol || "", sub, dup, sel: !dup && it.price > 0, manual: !it.price && !g.slice(1).length };
       });
       iStatus("");
       renderImport(url);
@@ -518,10 +526,10 @@
               <label class="sr" for="iv${i}">Dung tích</label><input id="iv${i}" class="i-vol" data-ifield="vol" data-i="${i}" value="${esc(r.vol)}" placeholder="Dung tích">
               <label class="sr" for="is${i}">Danh mục</label><select id="is${i}" data-ifield="sub" data-i="${i}">${subs.map(s => `<option${s === r.sub ? " selected" : ""}>${esc(s)}</option>`).join("")}</select>
               ${r.variants.length ? `<span class="st-chip">${r.variants.length + 1} phân loại: ${esc([r.vol, ...r.variants.map(v => v.label || v.vol)].filter(Boolean).join(", "))}</span>` : ""}
-              ${r.dup ? `<span class="st-chip warn">Đã có</span>` : ""}${r.item.available ? "" : `<span class="st-chip">Hãng hết hàng</span>`}${r.item.price ? "" : `<span class="st-chip bad">Không có giá</span>`}
+              ${r.dup ? `<span class="st-chip warn">Đã có</span>` : ""}${r.item.available ? "" : `<span class="st-chip">Hãng hết hàng</span>`}${r.manual && !r.item.price ? `<span class="st-chip bad">Web hãng không ghi giá – nhập giá bán</span>` : ""}
             </div>
           </div>
-          <div class="i-price num" data-price="${i}"></div>
+          <div class="i-price num" data-price="${i}">${r.manual ? `<label class="sr" for="ip${i}">Giá bán</label><input id="ip${i}" class="i-pin" type="number" min="1000" step="1000" inputmode="numeric" placeholder="Giá bán (đ)" data-iprice="${i}" value="${r.item.price || ""}">` : ""}</div>
         </div>`).join("")}</div>
       <div class="i-foot">
         <div id="iProg" class="hint"></div>
@@ -541,6 +549,8 @@
       row.hidden = !vis; if (vis) shown++;
       const { price, sale } = LI.calcPrice(r.item, o);
       const fam = [r.item, ...r.variants].map(x => { const c = LI.calcPrice(x, o); return c.sale || c.price; });
+      row.classList.toggle("skip", o.skipDup && r.dup);
+      if (r.manual) return;
       if (r.variants.length && new Set(fam).size > 1) { row.querySelector(`[data-price="${i}"]`).innerHTML = `<strong>${vnd(Math.min(...fam))}</strong><br><span class="muted">– ${vnd(Math.max(...fam))}</span>`; return; }
       row.querySelector(`[data-price="${i}"]`).innerHTML = price ? (sale ? `<s class="muted">${vnd(price)}</s><br><strong>${vnd(sale)}</strong>` : `<strong>${vnd(price)}</strong>`) : `<span class="muted">—</span>`;
       row.classList.toggle("skip", o.skipDup && r.dup);
@@ -627,6 +637,12 @@
     if (d.isel !== undefined) imp.rows[Number(d.isel)].sel = t.checked;
     else if (t.id === "iAll") imp.rows.forEach((r, i) => { const row = $("iList").querySelector(`[data-row="${i}"]`); if (!row.hidden) { r.sel = t.checked; row.querySelector("[data-isel]").checked = t.checked; } });
     else if (d.ifield) imp.rows[Number(d.i)][d.ifield] = t.value;
+    else if (d.iprice !== undefined) {
+      const r = imp.rows[Number(d.iprice)], v = Math.round(Number(t.value) || 0);
+      r.item.price = v >= 1000 ? v : 0; r.item.salePrice = 0;
+      r.sel = r.item.price > 0 && !r.dup; t.closest(".i-row").querySelector("[data-isel]").checked = r.sel;
+      const chip = t.closest(".i-row").querySelector(".st-chip.bad"); if (chip) chip.hidden = !!r.item.price;
+    }
     syncImport();
   });
   document.addEventListener("input", e => { if (e.target.id === "iFilter") { imp.query = e.target.value; syncImport(); } else if (e.target.id === "iPct") syncImport(); });
