@@ -6,5 +6,5 @@
     "build": "node scripts/fetch-data.js && node build.js",
     "dev": "node scripts/fetch-data.js && node build.js && npx --yes serve dist"
   },
-  "engines": { "node": ">=18" }
+  "engines": { "node": ">=20" }
 }
