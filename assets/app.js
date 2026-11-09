@@ -1,8 +1,13 @@
 /* Luna Cosmetics — giỏ hàng, bộ lọc cửa hàng, thanh toán */
 (() => {
-  const { products: P, cfg: CFG, needs: NEEDS, art: ACCENT } = window.LUNA;
+  const { products: ALL, cfg: CFG, needs: NEEDS, art: ACCENT } = window.LUNA;
+  const P = ALL.filter(p => !p.parent); // sản phẩm chính (phân loại hàng nằm trong ALL)
   const $ = id => document.getElementById(id);
-  const byId = id => P.find(p => p.id == id);
+  const byId = id => ALL.find(p => p.id == id);
+  const family = p => [p, ...ALL.filter(k => k.parent === p.id).sort((a, b) => (a.pos || 0) - (b.pos || 0) || (a.sale || a.price) - (b.sale || b.price))];
+  const minPrice = p => Math.min(...family(p).map(m => m.sale || m.price));
+  const vlabel = p => (p.vol ? ` · ${esc(p.vol)}` : "");
+  const preRate = () => Math.round((CFG.preorderDepositRate ?? 0.5) * 100);
   const priceOf = p => p.sale || p.price;
   const vnd = n => n.toLocaleString("vi-VN").replace(/,/g, ".") + "đ";
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -49,7 +54,7 @@
   const subtotal = () => Object.entries(cart).reduce((s, [id, q]) => s + priceOf(byId(id)) * q, 0);
   const add = (id, q = 1) => {
     const p = byId(id);
-    if (!p || p.inStock === false) return false;
+    if (!p || (p.inStock === false && !p.preorder)) return false;
     cart[id] = Math.min(MAX_QTY, (cart[id] || 0) + q); save();
     return true;
   };
@@ -61,7 +66,7 @@
       const p = byId(id);
       return `<div class="line">
         <div class="thumb" style="background:${p.tint}">${thumb(p)}</div>
-        <div><h4><a href="${p.url}">${esc(p.name)}</a></h4>
+        <div><h4><a href="${p.url}">${esc(p.name)}${vlabel(p)}</a></h4>
           <div class="qty"><button type="button" data-q="${id}" data-d="-1" aria-label="Giảm">−</button><span>${q}</span><button type="button" data-q="${id}" data-d="1" aria-label="Tăng">+</button></div></div>
         <span class="price">${vnd(priceOf(p) * q)}</span></div>`;
     }).join("") : `<div class="empty">Giỏ hàng đang trống.<br>Chọn vài món skincare yêu thích nhé.</div>`;
@@ -75,6 +80,19 @@
 
   /* ---------- trang sản phẩm ---------- */
   let pq = 1;
+  const vbox = document.querySelector("[data-variants]");
+  let selVid = vbox ? (vbox.querySelector('.vchip[aria-pressed="true"]') || {}).dataset?.vid : null;
+  const priceHtml = m => `<span class="price${m.sale ? " on-sale" : ""}">${vnd(priceOf(m))}</span>${m.sale ? `<s>${vnd(m.price)}</s><span class="badge-off">−${Math.round((1 - m.sale / m.price) * 100)}%</span>` : ""}`;
+  function pickVariant(id) {
+    const m = byId(id); if (!m) return;
+    selVid = String(m.id);
+    if (vbox) vbox.querySelectorAll(".vchip").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.vid === selVid)));
+    const pr = $("pdPrice") || document.querySelector(".pdp .prices"); if (pr) pr.innerHTML = priceHtml(m);
+    document.querySelectorAll("[data-add-qty]").forEach(b => { b.dataset.addQty = m.id; b.textContent = m.preorder ? "Đặt trước" : "Thêm vào giỏ"; });
+    document.querySelectorAll("[data-buy-now]").forEach(b => { b.dataset.buyNow = m.id; b.textContent = m.preorder ? "Đặt trước & thanh toán" : "Mua ngay"; });
+    const pre = $("pdPre");
+    if (pre) { pre.hidden = !m.preorder; if (m.preorder) pre.textContent = `Hàng order: shop nhập về sau khi bạn đặt, giao sau ${m.lead || "7–14 ngày"}.${preRate() ? ` Đơn có hàng order cần cọc trước ${preRate()}%.` : ""}`; }
+  }
 
   /* ---------- cửa hàng: bộ lọc ---------- */
   const shopEl = $("shop");
@@ -91,10 +109,10 @@
     { k: "1tr-1.5tr", l: "1 – 1,5 triệu", t: p => p >= 1000000 && p < 1500000 },
     { k: "tren-1.5tr", l: "Trên 1,5 triệu", t: p => p >= 1500000 },
   ];
-  const FLAGS = { all: () => true, new: p => p.isNew, sale: p => !!p.sale, best: p => p.pop >= 9 };
+  const FLAGS = { all: () => true, new: p => p.isNew, sale: p => family(p).some(m => m.sale), best: p => p.pop >= 9 };
   const S = { tab: "all", sub: "Tất cả", sort: "pop", flag: "all", q: "", sel: {}, open: new Set(GROUPS.map(g => g.key)) };
   GROUPS.forEach(g => (S.sel[g.key] = new Set()));
-  const valsOf = (p, k) => k === "brand" ? [p.brand] : k === "price" ? PRICES.filter(r => r.t(priceOf(p))).map(r => r.k) : p[k] || [];
+  const valsOf = (p, k) => k === "brand" ? [p.brand] : k === "price" ? PRICES.filter(r => r.t(minPrice(p))).map(r => r.k) : p[k] || [];
   const inTab = p => S.tab === "all" || p.cat === S.tab;
   function base(p) {
     if (!inTab(p)) return false;
@@ -162,7 +180,7 @@
     // lưới sản phẩm: ẩn/hiện và sắp xếp các thẻ có sẵn
     const list = P.filter(p => base(p) && facets(p));
     const pct = p => (p.sale ? 1 - p.sale / p.price : 0);
-    list.sort((a, b) => S.sort === "asc" ? priceOf(a) - priceOf(b) : S.sort === "desc" ? priceOf(b) - priceOf(a) : S.sort === "discount" ? pct(b) - pct(a) : S.sort === "new" ? (!!b.isNew - !!a.isNew) || b.id - a.id : b.pop - a.pop);
+    list.sort((a, b) => S.sort === "asc" ? minPrice(a) - minPrice(b) : S.sort === "desc" ? minPrice(b) - minPrice(a) : S.sort === "discount" ? pct(b) - pct(a) : S.sort === "new" ? (!!b.isNew - !!a.isNew) || b.id - a.id : b.pop - a.pop);
     const gridEl = $("grid"), show = new Set(list.map(p => String(p.id)));
     const cards = [...gridEl.querySelectorAll(".card")];
     cards.forEach(c => (c.hidden = !show.has(c.dataset.id)));
@@ -183,11 +201,13 @@
   const CITIES = ["TP. Hồ Chí Minh", "Hà Nội", "Đà Nẵng", "Cần Thơ", "Hải Phòng", "Huế", "Cà Mau", "Đồng Nai", "Tây Ninh", "Vĩnh Long", "Đồng Tháp", "An Giang", "Khánh Hoà", "Lâm Đồng", "Đắk Lắk", "Gia Lai", "Quảng Ngãi", "Quảng Trị", "Nghệ An", "Hà Tĩnh", "Thanh Hoá", "Ninh Bình", "Hưng Yên", "Bắc Ninh", "Phú Thọ", "Thái Nguyên", "Tuyên Quang", "Lào Cai", "Lạng Sơn", "Cao Bằng", "Điện Biên", "Lai Châu", "Sơn La", "Quảng Ninh"];
   let cartNotice = "";
 
+  const hasPre = () => Object.keys(cart).some(id => (byId(id) || {}).preorder);
   function quote(method) {
     const st = subtotal();
     if (method === "bank") return { ship: 0, fee: 0, total: st, deposit: st };
     const total = st + CFG.shipFee + CFG.codFee;
-    const deposit = st >= CFG.codDepositFrom ? Math.round((total * CFG.codDepositRate) / 1000) * 1000 : 0;
+    let deposit = st >= CFG.codDepositFrom ? Math.round((total * CFG.codDepositRate) / 1000) * 1000 : 0;
+    if (hasPre() && preRate()) deposit = Math.max(deposit, Math.round((total * preRate()) / 100 / 1000) * 1000);
     return { ship: CFG.shipFee, fee: CFG.codFee, total, deposit };
   }
   function readForm() {
@@ -209,7 +229,7 @@
       return;
     }
     const st = subtotal(), phoneBlocked = isBlocked(form.phone), overMax = st > CFG.codMax;
-    const codBlocked = overMax || phoneBlocked, depositNeeded = st >= CFG.codDepositFrom;
+    const codBlocked = overMax || phoneBlocked, depositNeeded = st >= CFG.codDepositFrom || (hasPre() && preRate() > 0);
     if (codBlocked && form.method === "cod") form.method = "bank";
     const qb = quote("bank"), qc = quote("cod"), q = quote(form.method);
     const blockMsg = phoneBlocked ? "Số điện thoại này chưa áp dụng COD, vui lòng chuyển khoản." : `Đơn trên ${vnd(CFG.codMax)} chỉ nhận chuyển khoản.`;
@@ -235,10 +255,11 @@
               <small>Quét mã QR sau khi đặt. Đơn được đóng gói ngay khi nhận tiền, kèm quà mẫu thử.</small>
               <small><strong>Thanh toán: ${vnd(qb.total)}</strong></small></span></label>
             <label class="opt${codBlocked ? " off" : ""}"><input type="radio" name="pm" value="cod"${form.method === "cod" ? " checked" : ""}${codBlocked ? " disabled" : ""}>
-              <span><b>Nhận hàng trả tiền (COD)${depositNeeded && !codBlocked ? ` <span class="badge w">Cần cọc ${Math.round(CFG.codDepositRate * 100)}%</span>` : ""}</b>
+              <span><b>Nhận hàng trả tiền (COD)${depositNeeded && !codBlocked ? ` <span class="badge w">Cần cọc ${hasPre() ? Math.max(preRate(), st >= CFG.codDepositFrom ? Math.round(CFG.codDepositRate * 100) : 0) : Math.round(CFG.codDepositRate * 100)}%</span>` : ""}</b>
               <small>${codBlocked ? blockMsg : `Ship ${vnd(CFG.shipFee)} + phí thu hộ ${vnd(CFG.codFee)}. Shop gọi hoặc nhắn Zalo xác nhận trước khi gửi hàng.`}</small>
               ${codBlocked ? "" : `<small><strong>Tổng: ${vnd(qc.total)}</strong>${qc.deposit ? ` · cọc trước ${vnd(qc.deposit)}, còn lại trả khi nhận` : ""}</small>`}</span></label>
           </div>
+          ${hasPre() ? `<div class="note">Đơn có <strong>hàng order</strong>: shop nhập hàng về sau khi bạn đặt và thanh toán${preRate() ? ` / cọc ${preRate()}%` : ""}, giao sau ${esc([...new Set(Object.keys(cart).map(byId).filter(p => p && p.preorder).map(p => p.lead || "7–14 ngày"))].join(", "))}.</div>` : ""}
           ${form.method === "cod" && !codBlocked ? `<div class="note">Chọn chuyển khoản để tiết kiệm <strong>${vnd(qc.total - qb.total)}</strong>${qc.deposit ? " và không cần cọc" : ""}.</div>` : ""}
         </fieldset>
         <p class="err" id="fErr" role="alert"></p>
@@ -246,7 +267,7 @@
       </form>
       <aside class="panel summary" aria-label="Tóm tắt đơn hàng">
         <p class="eyebrow" style="margin:0">Đơn hàng (${count()} sản phẩm)</p>
-        ${items.map(([id, n]) => { const p = byId(id); return `<div class="line"><div class="thumb" style="background:${p.tint}">${thumb(p)}</div><div><h4>${esc(p.name)}</h4><small>${esc(p.brand)} · x${n}</small></div><span class="price">${vnd(priceOf(p) * n)}</span></div>`; }).join("")}
+        ${items.map(([id, n]) => { const p = byId(id); return `<div class="line"><div class="thumb" style="background:${p.tint}">${thumb(p)}</div><div><h4>${esc(p.name)}${vlabel(p)}</h4><small>${esc(p.brand)} · x${n}${p.preorder ? ` · <b>Hàng order</b>` : ""}</small></div><span class="price">${vnd(priceOf(p) * n)}</span></div>`; }).join("")}
         <div class="row"><span>Tạm tính</span><span>${vnd(st)}</span></div>
         <div class="row"><span>Phí giao hàng</span><span>${q.ship ? vnd(q.ship) : "Miễn phí"}</span></div>
         ${q.fee ? `<div class="row"><span>Phí thu hộ</span><span>${vnd(q.fee)}</span></div>` : ""}
@@ -336,16 +357,17 @@
     const ids = Object.keys(cart).filter(id => /^\d+$/.test(id));
     if (!SB || !ids.length) return;
     try {
-      const [rows, st] = await Promise.all([rest(`products?id=in.(${ids.join(",")})&select=id,name,price,sale,in_stock`), rest("shop_settings?id=eq.1&select=*")]);
+      const [rows, st] = await Promise.all([rest(`products?id=in.(${ids.join(",")})&select=id,name,price,sale,in_stock,preorder,lead_time`), rest("shop_settings?id=eq.1&select=*")]);
       const s = st && st[0];
-      if (s) Object.assign(CFG, { shipFee: s.ship_fee, codFee: s.cod_fee, codDepositFrom: s.cod_deposit_from, codDepositRate: Number(s.cod_deposit_rate), codMax: s.cod_max });
+      if (s) Object.assign(CFG, { shipFee: s.ship_fee, codFee: s.cod_fee, codDepositFrom: s.cod_deposit_from, codDepositRate: Number(s.cod_deposit_rate), codMax: s.cod_max, ...(s.preorder_deposit_rate != null ? { preorderDepositRate: Number(s.preorder_deposit_rate) } : {}) });
       const gone = [], changed = [];
       ids.forEach(id => {
         const p = byId(id), r = rows.find(x => String(x.id) === id);
-        if (!r || !r.in_stock) { gone.push(p.name); delete cart[id]; p.inStock = false; return; }
+        if (r) { p.preorder = !!r.preorder; p.lead = r.lead_time || p.lead; }
+        if (!r || (!r.in_stock && !r.preorder)) { gone.push(p.name + (p.vol ? ` ${p.vol}` : "")); delete cart[id]; p.inStock = false; return; }
         const before = priceOf(p);
         p.price = r.price; p.sale = r.sale || 0;
-        if (priceOf(p) !== before) changed.push(p.name);
+        if (priceOf(p) !== before) changed.push(p.name + (p.vol ? ` ${p.vol}` : ""));
       });
       cartNotice = [gone.length ? `${gone.join(", ")} vừa hết hàng nên đã được bỏ khỏi giỏ.` : "", changed.length ? `Giá của ${changed.join(", ")} vừa được cập nhật.` : ""].filter(Boolean).join(" ");
       if (gone.length) store.set("luna-cart", cart);
@@ -356,23 +378,32 @@
   // Cập nhật còn hàng / giá mới nhất trên các thẻ sản phẩm và trang sản phẩm (không cần đợi build lại web)
   async function liveStock() {
     const cards = document.querySelectorAll(".card[data-id]"), buy = document.querySelector("[data-buy]");
-    if (!SB || (!cards.length && !buy)) return;
+    if (!SB || (!cards.length && !buy && !vbox)) return;
     let rows;
-    try { rows = await rest("products?select=id,price,sale,in_stock"); } catch (e) { return; }
+    try { rows = await rest("products?select=id,price,sale,in_stock,preorder,lead_time"); } catch (e) { return; }
     const byRow = Object.fromEntries(rows.map(r => [String(r.id), r]));
-    P.forEach(p => { const r = byRow[String(p.id)]; if (r) { p.inStock = r.in_stock; p.price = r.price; p.sale = r.sale || 0; } });
+    ALL.forEach(p => { const r = byRow[String(p.id)]; if (r) { p.inStock = r.in_stock; p.preorder = !!r.preorder; p.lead = r.lead_time || p.lead; p.price = r.price; p.sale = r.sale || 0; } });
     cards.forEach(c => {
       const p = byId(c.dataset.id), btn = c.querySelector(".add"); if (!p || !btn) return;
-      if (!p.inStock) { btn.disabled = true; btn.textContent = "Hết hàng"; btn.removeAttribute("data-add"); }
-      else if (btn.disabled) { btn.disabled = false; btn.textContent = "Thêm vào giỏ"; btn.dataset.add = p.id; }
+      const fam = family(p), many = fam.length > 1, any = fam.some(m => m.inStock || m.preorder);
+      let el = btn;
+      const swap = html => { const t = document.createElement("template"); t.innerHTML = html.trim(); el.replaceWith(t.content.firstChild); };
+      if (!any) swap(`<button class="add" disabled>Hết hàng</button>`);
+      else if (many && el.tagName !== "A") swap(`<a class="add" href="${p.url}">Chọn phân loại</a>`);
+      else if (!many && (el.disabled || el.tagName === "A" || el.textContent !== (p.preorder ? "Đặt trước" : "Thêm vào giỏ"))) swap(`<button class="add" data-add="${p.id}">${p.preorder ? "Đặt trước" : "Thêm vào giỏ"}</button>`);
       const pr = c.querySelector(".prices");
-      if (pr) pr.innerHTML = `<span class="price${p.sale ? " on-sale" : ""}">${vnd(priceOf(p))}</span>${p.sale ? `<s>${vnd(p.price)}</s>` : ""}`;
+      if (pr) pr.innerHTML = many && new Set(fam.map(priceOf)).size > 1 ? `<span class="price">Từ ${vnd(minPrice(p))}</span>` : `<span class="price${p.sale ? " on-sale" : ""}">${vnd(priceOf(p))}</span>${p.sale ? `<s>${vnd(p.price)}</s>` : ""}`;
     });
-    if (buy) {
-      const p = byId(buy.dataset.buy);
-      if (p && !p.inStock) buy.outerHTML = `<p class="note">Tạm hết hàng. Nhắn Zalo ${esc(CFG.zalo)} để được báo khi có hàng.</p>`;
-      const pr = document.querySelector(".pdp .prices");
-      if (p && pr) pr.innerHTML = `<span class="price${p.sale ? " on-sale" : ""}">${vnd(priceOf(p))}</span>${p.sale ? `<s>${vnd(p.price)}</s><span class="badge-off">−${Math.round((1 - p.sale / p.price) * 100)}%</span>` : ""}`;
+    if (buy || vbox) {
+      const main = byId((buy && buy.dataset.buy) || (vbox && vbox.dataset.variants));
+      if (!main) return;
+      const fam = family(main);
+      if (vbox) vbox.querySelectorAll(".vchip").forEach(b => { const m = byId(b.dataset.vid); if (!m) return; b.disabled = !(m.inStock || m.preorder); b.querySelector("small").textContent = m.preorder ? `Order · ${vnd(priceOf(m))}` : m.inStock ? vnd(priceOf(m)) : "Hết hàng"; });
+      const sel = byId(selVid);
+      const ok = m => m && (m.inStock || m.preorder);
+      const next = ok(sel) ? sel : fam.find(m => m.inStock && !m.preorder) || fam.find(ok);
+      if (!next) { if (buy) buy.outerHTML = `<p class="note">Tạm hết hàng. Nhắn Zalo ${esc(CFG.zalo)} để được báo khi có hàng.</p>`; }
+      else pickVariant(next.id);
     }
   }
 
@@ -381,12 +412,12 @@
   const myOrders = () => store.get("luna-my-orders", []);
   const remember = (code, phone) => store.set("luna-my-orders", [{ code, phone }, ...myOrders().filter(o => o.code !== code)].slice(0, 10));
   const T_STATUS = {
-    cho_thanh_toan: ["Chờ thanh toán", "wait"], cho_xac_nhan: ["Chờ xác nhận", "wait"], da_xac_nhan: ["Đang đóng gói", "go"],
+    cho_thanh_toan: ["Chờ thanh toán", "wait"], cho_xac_nhan: ["Chờ xác nhận", "wait"], da_xac_nhan: ["Đang đóng gói", "go"], cho_hang: ["Chờ hàng về", "wait"],
     dang_giao: ["Đang giao", "go"], hoan_thanh: ["Đã giao", "done"], da_huy: ["Đã huỷ", "off"],
   };
   const T_EVENT = {
     cho_thanh_toan: "Đặt hàng thành công, chờ thanh toán", cho_xac_nhan: "Đặt hàng thành công, chờ shop xác nhận",
-    da_thanh_toan: "Luna đã nhận thanh toán", da_xac_nhan: "Đơn đã xác nhận, đang đóng gói",
+    da_thanh_toan: "Luna đã nhận thanh toán", da_xac_nhan: "Đơn đã xác nhận, đang đóng gói", cho_hang: "Shop đang nhập hàng về cho bạn",
     dang_giao: "Đã giao cho đơn vị vận chuyển", hoan_thanh: "Giao hàng thành công", da_huy: "Đơn đã huỷ",
   };
   const fmtT = t => new Date(t).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" });
@@ -418,12 +449,14 @@
     const pay = o.method === "bank" ? o.total : o.deposit;
     // tiến trình 5 bước
     const step2 = o.method === "bank" ? "Thanh toán" : o.deposit > 0 ? "Đặt cọc" : "Xác nhận";
-    const at = { cho_thanh_toan: 1, cho_xac_nhan: 1, da_xac_nhan: 2, dang_giao: 3, hoan_thanh: 5 }[o.status] ?? 1;
-    const steps = ["Đặt hàng", step2, "Đóng gói", "Đang giao", "Đã giao"];
+    const at = { cho_thanh_toan: 1, cho_xac_nhan: 1, da_xac_nhan: 2, cho_hang: 2, dang_giao: 3, hoan_thanh: 5 }[o.status] ?? 1;
+    const pre = (o.items || []).some(i => i.preorder);
+    const steps = ["Đặt hàng", step2, pre ? "Nhập hàng & đóng gói" : "Đóng gói", "Đang giao", "Đã giao"];
     const msg = {
       cho_thanh_toan: o.method === "bank" ? "Đơn sẽ được đóng gói ngay khi Luna nhận được chuyển khoản." : `Vui lòng chuyển khoản tiền cọc ${vnd(o.deposit)} để Luna xác nhận đơn.`,
       cho_xac_nhan: "Luna sẽ gọi hoặc nhắn Zalo cho bạn để xác nhận trước khi gửi hàng.",
-      da_xac_nhan: "Đơn đã được xác nhận và đang đóng gói, thường gửi đi trong ngày.",
+      da_xac_nhan: pre ? "Đơn đã được xác nhận. Shop đang nhập hàng order về cho bạn." : "Đơn đã được xác nhận và đang đóng gói, thường gửi đi trong ngày.",
+      cho_hang: `Hàng order đang được nhập về${(o.items.find(i => i.lead) || {}).lead ? ` (khoảng ${(o.items.find(i => i.lead) || {}).lead})` : ""}. Luna sẽ gửi ngay khi hàng về.`,
       dang_giao: "Đơn đang trên đường đến bạn, thường mất 1–3 ngày.",
       hoan_thanh: "Đơn đã giao thành công. Cảm ơn bạn đã mua sắm tại Luna!",
       da_huy: `Đơn này đã huỷ. Nếu có nhầm lẫn, vui lòng nhắn Zalo ${CFG.zalo}.`,
@@ -451,7 +484,7 @@
   <div class="t-cols">
     <div><h3>Lịch sử đơn hàng</h3><ol class="timeline">${(o.events || []).map(e => `<li>${esc(T_EVENT[e.status] || e.status)}<time datetime="${esc(e.at)}">${fmtT(e.at)}</time></li>`).join("")}</ol></div>
     <div><h3>Sản phẩm</h3>
-      <ul class="t-items">${(o.items || []).map(i => `<li><span>${i.qty} × ${esc(i.name)}</span><span>${vnd(i.price * i.qty)}</span></li>`).join("")}</ul>
+      <ul class="t-items">${(o.items || []).map(i => `<li><span>${i.qty} × ${esc(i.name)}${i.vol ? ` (${esc(i.vol)})` : ""}${i.preorder ? ` · <b>hàng order</b>` : ""}</span><span>${vnd(i.price * i.qty)}</span></li>`).join("")}</ul>
       <div class="df" style="padding:12px 0 0;background:none">
         ${o.ship ? `<div class="row"><span>Phí giao hàng</span><span>${vnd(o.ship)}</span></div>` : `<div class="row"><span>Phí giao hàng</span><span>Miễn phí</span></div>`}
         ${o.fee ? `<div class="row"><span>Phí thu hộ</span><span>${vnd(o.fee)}</span></div>` : ""}
@@ -469,7 +502,8 @@
     const t = e.target.closest("button,a");
     if (!t) return;
     const d = t.dataset;
-    if (d.track) lookup(d.track, d.phone);
+    if (d.vid) pickVariant(d.vid);
+    else if (d.track) lookup(d.track, d.phone);
     else if (d.add) {
       if (!add(d.add)) { t.textContent = "Hết hàng"; t.disabled = true; return; }
       t.textContent = "Đã thêm ✓"; t.classList.add("done");

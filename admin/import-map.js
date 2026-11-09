@@ -110,16 +110,21 @@
     const letters = s.replace(/[^\p{L}]/gu, "");
     return /:$/.test(s) || (letters.length >= 3 && letters === letters.toUpperCase());
   };
+  // HTML → các dòng chữ (giữ gạch đầu dòng, bỏ link, ảnh, nút bấm)
+  function textLines(html, keepButtons) {
+    const d = new DOMParser().parseFromString(String(html || ""), "text/html");
+    d.querySelectorAll(`script,style,iframe,img,video,svg,noscript,form,picture,source${keepButtons ? "" : ",button"}`).forEach(e => e.remove());
+    d.querySelectorAll("br").forEach(e => e.replaceWith("\n"));
+    d.querySelectorAll("li").forEach(e => e.prepend("• "));
+    d.querySelectorAll("p,div,li,h1,h2,h3,h4,h5,h6,tr,section,ul,ol,blockquote,dt,dd,summary,button,span.h6").forEach(e => e.append("\n"));
+    return (d.body ? d.body.textContent : "").split("\n").map(s => s.replace(/\s+/g, " ").trim())
+      .filter(s => s.replace(/[•\-–*\s]/g, "").length > 1 && !/https?:\/\//i.test(s));
+  }
+  const capLines = (arr, max) => { let s = ""; for (const l of arr) { if ((s + "\n" + l).length > max) break; s += (s ? "\n" : "") + l; } return s; };
   function cleanHtml(html) {
     const out = { desc: [], howto: [], ingredients: [] };
     if (!html) return { desc: "", howto: "", ingredients: "" };
-    const d = new DOMParser().parseFromString(String(html), "text/html");
-    d.querySelectorAll("script,style,iframe,img,video,svg,noscript,button,form,picture,source").forEach(e => e.remove());
-    d.querySelectorAll("br").forEach(e => e.replaceWith("\n"));
-    d.querySelectorAll("li").forEach(e => e.prepend("• "));
-    d.querySelectorAll("p,div,li,h1,h2,h3,h4,h5,h6,tr,section,ul,ol,blockquote,dt,dd").forEach(e => e.append("\n"));
-    const lines = (d.body ? d.body.textContent : "").split("\n").map(s => s.replace(/\s+/g, " ").trim())
-      .filter(s => s.replace(/[•\-–*\s]/g, "").length > 1 && !/https?:\/\//i.test(s));
+    const lines = textLines(html);
     let cur = "desc";
     for (const line of lines) {
       const n = norm(line.replace(/^[•\-–*\s]+/, ""));
@@ -131,8 +136,50 @@
       }
       if (cur !== "skip") out[cur].push(line);
     }
-    const cap = (arr, max) => { let s = ""; for (const l of arr) { if ((s + "\n" + l).length > max) break; s += (s ? "\n" : "") + l; } return s; };
-    return { desc: cap(out.desc, 2500), howto: cap(out.howto, 1200), ingredients: cap(out.ingredients, 2000) };
+    return { desc: capLines(out.desc, 2500), howto: capLines(out.howto, 1200), ingredients: capLines(out.ingredients, 2000) };
+  }
+
+  /* ---------- trang sản phẩm của hãng: lấy Cách dùng, Thành phần ---------- */
+  // Các mục lớn thường gặp trên trang sản phẩm; gặp mục khác thì dừng
+  const H_SECTION = /^(muc dich su dung|cong dung|thong tin an toan|cach bao quan|bao quan|luu y|doi tuong|ket qua|cam ket|chi tiet san pham|mo ta|thong tin san pham|goi y routine|tham khao|tim hieu them|xem them|cau hoi|danh gia|san pham lien quan|ban co the thich|khach hang|ve chung toi|ho tro|lien he|dang ky|chinh sach)/;
+  function extractPage(html) {
+    const res = { howto: "", ingredients: "" };
+    if (!html) return res;
+    const d = new DOMParser().parseFromString(String(html), "text/html");
+    d.querySelectorAll("script,style,noscript,svg,header,footer,nav,[class*=footer],[class*=header],[class*=cart-drawer],[class*=newsletter],[id*=footer],[id*=header]").forEach(e => e.remove());
+    // 1) tab / accordion: tiêu đề + khung nội dung
+    const take = (title, el) => {
+      const n = norm(title.replace(/[:\s]+$/, ""));
+      const lines = textLines(el.innerHTML);
+      if (!lines.length) return;
+      if (!res.howto && H_HOWTO.test(n)) res.howto = capLines(lines, 1500);
+      else if (!res.ingredients && H_INGR.test(n)) res.ingredients = capLines(lines, 2500);
+    };
+    d.querySelectorAll("[aria-controls]").forEach(b => { const p = d.getElementById(b.getAttribute("aria-controls")); if (p) take(b.textContent, p); });
+    d.querySelectorAll("details > summary").forEach(sm => { const box = sm.parentElement.cloneNode(true); box.querySelector("summary").remove(); take(sm.textContent, box); });
+    // 2) quét chữ trên trang: dòng tiêu đề "Hướng dẫn sử dụng" / "Thành phần" và các dòng sau nó
+    if (!res.howto || !res.ingredients) {
+      const main = d.querySelector("main") || d.body;
+      const lines = main ? textLines(main.innerHTML, true) : [];
+      const grab = re => {
+        for (let i = 0; i < lines.length; i++) {
+          const n = norm(lines[i]);
+          if (lines[i].length > 80 || !re.test(n)) continue;
+          const rest = lines[i].replace(/^[^:]*:\s*/, "");
+          const out = rest && rest !== lines[i] ? [rest] : [];
+          for (let j = i + 1; j < lines.length && out.join("\n").length < 1500; j++) {
+            const m = norm(lines[j]);
+            if (lines[j].length < 60 && (H_SECTION.test(m) || H_HOWTO.test(m) || H_INGR.test(m))) break;
+            out.push(lines[j]);
+          }
+          if (out.length) return capLines(out, 1500);
+        }
+        return "";
+      };
+      if (!res.howto) res.howto = grab(H_HOWTO);
+      if (!res.ingredients) res.ingredients = grab(H_INGR);
+    }
+    return res;
   }
 
   /* ---------- đọc dữ liệu từng nền tảng ---------- */
@@ -147,9 +194,9 @@
       const price = Math.round(Number(v.price) || 0), cmp = Math.round(Number(v.compare_at_price) || 0);
       const size = findSize(vt) || findSize(p.title) || labeledSize(p.body_html);
       return {
-        key: `shopify-${p.id}-${v.id || 0}`,
-        sourceUrl: `${origin}/products/${p.handle}${multi && v.id ? `?variant=${v.id}` : ""}`,
-        name: p.title + (multi && vt && !findSize(vt) ? ` – ${vt}` : ""),
+        key: `shopify-${p.id}-${v.id || 0}`, group: `shopify-${p.id}`, label: size || vt,
+        sourceUrl: `${origin}/products/${p.handle}`,
+        name: p.title,
         vendor: p.vendor || "", vol: size,
         price: cmp > price ? cmp : price, salePrice: cmp > price ? price : 0,
         images: uniq([vImg, ...imgs]), html: p.body_html || "",
@@ -230,6 +277,7 @@
   }
   function toProduct(item, opts) {
     const c = cleanHtml(item.html);
+    if (item.extra) { c.howto = c.howto || item.extra.howto || ""; c.ingredients = item.extra.ingredients || c.ingredients; }
     const head = norm([item.name, item.type, item.tags.join(" | ")].join(" | "));
     const body = norm(c.desc + "\n" + c.howto + "\n" + c.ingredients);
     const { sub, cat } = pickSub(item.name, item.type, item.tags);
@@ -250,6 +298,6 @@
     };
   }
 
-  g.LunaImport = { plan, fromShopify, fromWoo, fromHtml, toProduct, calcPrice, cleanHtml, pickSub, findSize, cleanBrand, hostBrand, norm,
+  g.LunaImport = { plan, fromShopify, fromWoo, fromHtml, toProduct, calcPrice, cleanHtml, extractPage, pickSub, findSize, cleanBrand, hostBrand, norm,
     SUBS: SUB_RULES.map(r => r[0]), MAKEUP: SUB_RULES.filter(r => r[1] === "makeup").map(r => r[0]), SHAPE, TINT };
 })(typeof window !== "undefined" ? window : globalThis);

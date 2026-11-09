@@ -21,7 +21,8 @@
       "bin": "970436",
       "acc": "1015768144",
       "holder": "NGO KIEU LAM"
-    }
+    },
+    "preorderDepositRate": 0.5
   },
   "supabase": {
     "url": "https://aawhgpfmbkjytjuuygwa.supabase.co",

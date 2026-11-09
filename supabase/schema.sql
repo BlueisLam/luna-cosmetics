@@ -138,7 +138,7 @@ declare
   v_items jsonb := '[]'::jsonb;
   v_sub int := 0; v_ship int := 0; v_fee int := 0; v_total int; v_dep int := 0;
   r record; pr public.products; inv record; v_qty int; v_cost int; v_code text; i int := 0;
-  v_moves jsonb := '[]'::jsonb; v_oid bigint;
+  v_moves jsonb := '[]'::jsonb; v_oid bigint; v_pre boolean := false;
 begin
   if p_method not in ('bank','cod') then raise exception 'BAD_METHOD'; end if;
   if v_phone !~ '^0(3|5|7|8|9)[0-9]{8}$' then raise exception 'BAD_PHONE'; end if;
@@ -152,19 +152,21 @@ begin
   for r in select * from jsonb_to_recordset(p_items) as x(id bigint, qty int) loop
     select * into pr from public.products where id = r.id and visible;
     if not found then raise exception 'PRODUCT_NOT_FOUND:%', r.id; end if;
-    if not pr.in_stock then raise exception 'OUT_OF_STOCK:%', pr.name; end if;
+    if not pr.in_stock and not pr.preorder then raise exception 'OUT_OF_STOCK:%', pr.name || coalesce(' ' || nullif(pr.vol, ''), ''); end if;
+    if pr.preorder then v_pre := true; end if;
     if coalesce(r.qty,0) < 1 or r.qty > 20 then raise exception 'BAD_QTY'; end if;
     v_qty := r.qty; v_cost := 0;
     -- Sản phẩm có quản lý kho: khoá dòng để 2 khách đặt cùng lúc không bán quá số tồn
     select * into inv from public.inventory where product_id = pr.id for update;
     if found then
-      if inv.stock < v_qty then raise exception 'OUT_OF_STOCK:%', pr.name; end if;
+      if inv.stock < v_qty and not pr.preorder then raise exception 'OUT_OF_STOCK:%', pr.name || coalesce(' ' || nullif(pr.vol, ''), ''); end if;
       update public.inventory set stock = stock - v_qty, updated_at = now() where product_id = pr.id;
       v_cost := inv.cost;
       v_moves := v_moves || jsonb_build_object('id', pr.id, 'qty', v_qty);
     end if;
     v_sub := v_sub + coalesce(pr.sale, pr.price) * v_qty;
-    v_items := v_items || jsonb_build_object('id', pr.id, 'name', pr.name, 'brand', pr.brand, 'vol', pr.vol, 'price', coalesce(pr.sale, pr.price), 'qty', v_qty, 'cost', v_cost);
+    v_items := v_items || jsonb_build_array(jsonb_build_object('id', pr.id, 'name', pr.name, 'brand', pr.brand, 'vol', pr.vol, 'price', coalesce(pr.sale, pr.price), 'qty', v_qty, 'cost', v_cost)
+      || case when pr.preorder then jsonb_build_object('preorder', true, 'lead', pr.lead_time) else '{}'::jsonb end);
   end loop;
 
   select * into s from public.shop_settings where id = 1;
@@ -176,6 +178,10 @@ begin
   v_total := v_sub + v_ship + v_fee;
   if p_method = 'bank' then v_dep := v_total;
   elsif v_sub >= s.cod_deposit_from then v_dep := (round(v_total * s.cod_deposit_rate / 1000.0) * 1000)::int;
+  end if;
+  -- đơn có hàng order: COD phải cọc ít nhất preorder_deposit_rate
+  if p_method = 'cod' and v_pre and coalesce(s.preorder_deposit_rate, 0) > 0 then
+    v_dep := greatest(v_dep, (round(v_total * s.preorder_deposit_rate / 1000.0) * 1000)::int);
   end if;
 
   loop
@@ -398,7 +404,7 @@ begin
   v as (select * from o where status in ('da_xac_nhan','dang_giao','hoan_thanh')),
   pe as (select * from o where status in ('cho_thanh_toan','cho_xac_nhan')),
   it as (
-    select (e->>'id')::bigint as id, e->>'name' as name, (e->>'qty')::int as qty, (e->>'price')::int as price,
+    select (e->>'id')::bigint as id, e->>'name' || coalesce(' · ' || nullif(e->>'vol', ''), '') as name, (e->>'qty')::int as qty, (e->>'price')::int as price,
            nullif((e->>'cost')::int, 0) as cost, v.id as oid
     from v, jsonb_array_elements(v.items) e
   ),
@@ -433,6 +439,61 @@ begin
 end $$;
 revoke all on function public.admin_stats(timestamptz,timestamptz) from public;
 grant execute on function public.admin_stats(timestamptz,timestamptz) to authenticated;
+
+-- =====================================================================
+-- GIAI ĐOẠN 5: phân loại hàng (dung tích, màu…)
+-- Mỗi phân loại là 1 dòng products "con" (variant_of = id sản phẩm chính), có giá, tồn kho riêng.
+-- Phân loại 1 chính là sản phẩm chính. Thông tin chung (tên, thương hiệu, danh mục, ẩn/hiện…)
+-- luôn lấy theo sản phẩm chính.
+-- =====================================================================
+alter table public.products add column if not exists variant_of bigint references public.products(id) on delete cascade;
+alter table public.products add column if not exists position int not null default 0;
+create index if not exists products_variant_of_idx on public.products (variant_of);
+
+create or replace function public.product_variant_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare par public.products;
+begin
+  if new.variant_of is null then
+    return new;
+  end if;
+  if new.variant_of = new.id then raise exception 'VARIANT_SELF'; end if;
+  select * into par from public.products where id = new.variant_of;
+  if not found then raise exception 'VARIANT_PARENT_NOT_FOUND'; end if;
+  if par.variant_of is not null then raise exception 'VARIANT_NESTED'; end if;
+  if tg_op = 'UPDATE' and exists (select 1 from public.products where variant_of = new.id) then raise exception 'VARIANT_HAS_CHILDREN'; end if;
+  new.name := par.name; new.brand := par.brand; new.origin := par.origin; new.cat := par.cat; new.sub := par.sub;
+  new.visible := par.visible; new.is_new := par.is_new; new.actives := par.actives; new.skin := par.skin;
+  new.concerns := par.concerns; new.shape := par.shape; new.tint := par.tint; new.pop := par.pop; new.lead_time := par.lead_time;
+  return new;
+end $$;
+drop trigger if exists products_variant_guard on public.products;
+create trigger products_variant_guard before insert or update on public.products for each row execute function public.product_variant_guard();
+
+create or replace function public.product_variant_propagate() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.variant_of is null and (new.name, new.brand, new.origin, new.cat, new.sub, new.visible, new.is_new, new.actives, new.skin, new.concerns, new.shape, new.tint, new.pop, new.lead_time)
+     is distinct from (old.name, old.brand, old.origin, old.cat, old.sub, old.visible, old.is_new, old.actives, old.skin, old.concerns, old.shape, old.tint, old.pop, old.lead_time) then
+    update public.products set updated_at = now() where variant_of = new.id; -- trigger guard chép lại thông tin chung
+  end if;
+  return new;
+end $$;
+drop trigger if exists products_variant_propagate on public.products;
+create trigger products_variant_propagate after update on public.products for each row execute function public.product_variant_propagate();
+
+-- =====================================================================
+-- GIAI ĐOẠN 6: hàng order (không có sẵn, khách đặt rồi shop mới nhập)
+-- Hàng order luôn nhận đặt; nếu quản lý kho thì kho được âm (= số khách đặt chờ nhập).
+-- Đơn COD có hàng order phải cọc trước preorder_deposit_rate.
+-- =====================================================================
+alter table public.products add column if not exists preorder boolean not null default false;
+alter table public.products add column if not exists lead_time text not null default '';
+alter table public.shop_settings add column if not exists preorder_deposit_rate numeric(4,3) not null default 0.5
+  check (preorder_deposit_rate between 0 and 1);
+alter table public.orders drop constraint if exists orders_status_check;
+alter table public.orders add constraint orders_status_check
+  check (status in ('cho_thanh_toan','cho_xac_nhan','da_xac_nhan','cho_hang','dang_giao','hoan_thanh','bom_hang','da_huy'));
 
 -- =====================================================================
 -- SAU KHI CHẠY XONG: cấp quyền admin cho tài khoản của bạn

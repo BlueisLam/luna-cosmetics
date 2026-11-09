@@ -12,9 +12,9 @@
   if (!CFG.supabase || !window.supabase) { $("setup").hidden = false; return; }
   const sb = window.supabase.createClient(CFG.supabase.url, CFG.supabase.anonKey);
 
-  const ST = [["cho_thanh_toan", "Chờ thanh toán"], ["cho_xac_nhan", "Chờ xác nhận"], ["da_xac_nhan", "Đã xác nhận"], ["dang_giao", "Đang giao"], ["hoan_thanh", "Hoàn thành"], ["bom_hang", "Bom hàng"], ["da_huy", "Đã huỷ"]];
+  const ST = [["cho_thanh_toan", "Chờ thanh toán"], ["cho_xac_nhan", "Chờ xác nhận"], ["da_xac_nhan", "Đã xác nhận"], ["cho_hang", "Chờ hàng về"], ["dang_giao", "Đang giao"], ["hoan_thanh", "Hoàn thành"], ["bom_hang", "Bom hàng"], ["da_huy", "Đã huỷ"]];
   const stName = Object.fromEntries(ST);
-  const OPEN = ["cho_thanh_toan", "cho_xac_nhan", "da_xac_nhan", "dang_giao"];
+  const OPEN = ["cho_thanh_toan", "cho_xac_nhan", "da_xac_nhan", "cho_hang", "dang_giao"];
   const SKIN = ["Da dầu", "Da khô", "Da hỗn hợp", "Da nhạy cảm", "Mọi loại da"];
   const SHAPES = [["dropper", "Lọ serum"], ["bottle", "Chai"], ["pump", "Chai vòi nhấn"], ["tube", "Tuýp"], ["jar", "Hũ"], ["compact", "Hộp phấn"], ["lipstick", "Son thỏi"], ["tint", "Son tint"]];
 
@@ -96,7 +96,7 @@
       <p class="muted">${esc(o.address)}${o.city ? ", " + esc(o.city) : ""}</p>
       ${o.note ? `<p>Khách ghi: ${esc(o.note)}</p>` : ""}
     </div>
-    <ul class="o-items">${(o.items || []).map(i => `<li><span>${i.qty} × ${esc(i.name)}${i.vol ? ` (${esc(i.vol)})` : ""}</span><span>${vnd(i.price * i.qty)}</span></li>`).join("")}</ul>
+    <ul class="o-items">${(o.items || []).map(i => `<li><span>${i.qty} × ${esc(i.name)}${i.vol ? ` (${esc(i.vol)})` : ""}${i.preorder ? ` <span class="st-chip warn">Order${i.lead ? ` · ${esc(i.lead)}` : ""}</span>` : ""}</span><span>${vnd(i.price * i.qty)}</span></li>`).join("")}</ul>
   </div>
   <div class="o-money">
     <span class="${o.method === "bank" ? "m-bank" : "m-cod"}">${o.method === "bank" ? "Chuyển khoản" : "COD"}</span>
@@ -148,28 +148,41 @@
     if (error) { $("pList").innerHTML = `<p class="err">Không tải được sản phẩm: ${esc(error.message)}</p>`; return; }
     products = data; renderProducts();
   }
+  const rootOf = p => (p && p.variant_of ? products.find(x => x.id === p.variant_of) || p : p);
+  const kidsOf = id => products.filter(k => k.variant_of === id).sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
+  const priceTxt = p => (p.sale ? `<s class="muted">${vnd(p.price)}</s> <span class="on-sale">${vnd(p.sale)}</span>` : vnd(p.price));
   function renderProducts() {
     const q = norm(pQuery);
-    const list = products.filter(p => !q || norm(`${p.name} ${p.brand} ${p.sub} ${(p.actives || []).join(" ")}`).includes(q));
-    $("pCount").textContent = `${list.length} / ${products.length} sản phẩm · ${products.filter(p => !p.in_stock).length} hết hàng · ${products.filter(p => !p.visible).length} đang ẩn`;
-    $("pList").innerHTML = list.length ? list.map(p => `<div class="p-row${p.visible ? "" : " off"}">
+    const roots = products.filter(p => rootOf(p) === p);
+    const match = p => !q || norm(`${p.name} ${p.brand} ${p.sub} ${p.vol} ${(p.actives || []).join(" ")}`).includes(q);
+    const list = roots.filter(p => match(p) || kidsOf(p.id).some(match));
+    $("pCount").textContent = `${list.length} / ${roots.length} sản phẩm · ${products.length - roots.length} phân loại thêm · ${products.filter(p => !p.in_stock && !p.preorder).length} hết hàng · ${products.filter(p => p.preorder).length} hàng order · ${roots.filter(p => !p.visible).length} đang ẩn`;
+    const stockBtn = p => `<button type="button" class="tg stock" data-tg="in_stock" data-pid="${p.id}" aria-pressed="${p.in_stock || !!p.preorder}">${p.preorder ? "Hàng order" : p.in_stock ? "Còn hàng" : "Hết hàng"}</button>`;
+    $("pList").innerHTML = list.length ? list.map(p => {
+      const kids = kidsOf(p.id);
+      return `<div class="p-row${p.visible ? "" : " off"}">
       <div class="p-thumb" style="background:${esc(p.tint)}">${p.images && p.images[0] ? `<img src="${esc(p.images[0])}" alt="" loading="lazy">` : ""}</div>
       <div>
         <div class="p-name">${esc(p.name)}</div>
-        <div class="p-sub">${esc(p.brand)} · ${esc(p.sub)} · ${esc(p.vol)}</div>
+        <div class="p-sub">${esc(p.brand)} · ${esc(p.sub)} · ${esc(p.vol)}${kids.length ? ` · <b>${kids.length + 1} phân loại</b>` : ""}</div>
         <div class="p-flags">
           <button type="button" class="tg" data-tg="visible" data-pid="${p.id}" aria-pressed="${p.visible}">${p.visible ? "Đang hiện" : "Đang ẩn"}</button>
-          <button type="button" class="tg stock" data-tg="in_stock" data-pid="${p.id}" aria-pressed="${p.in_stock}">${p.in_stock ? "Còn hàng" : "Hết hàng"}</button>
+          ${stockBtn(p)}
           <button type="button" class="tg" data-tg="is_new" data-pid="${p.id}" aria-pressed="${p.is_new}">Mới về</button>
         </div>
       </div>
       <div class="p-right">
-        <span class="price">${p.sale ? `<s class="muted">${vnd(p.price)}</s> <span class="on-sale">${vnd(p.sale)}</span>` : vnd(p.price)}</span>
+        <span class="price">${priceTxt(p)}</span>
         <button type="button" class="btn ghost sm" data-edit="${p.id}">Sửa</button>
-      </div></div>`).join("") : `<p class="loading">${products.length ? "Không có sản phẩm khớp." : "Chưa có sản phẩm. Bấm “Thêm sản phẩm” hoặc chạy supabase/seed.sql."}</p>`;
+      </div></div>${kids.map(k => `<div class="p-row child${p.visible ? "" : " off"}">
+      <div class="p-thumb" aria-hidden="true">↳</div>
+      <div><div class="p-name">${esc(k.vol || "Phân loại")}</div><div class="p-flags">${stockBtn(k)}</div></div>
+      <div class="p-right"><span class="price">${priceTxt(k)}</span><button type="button" class="btn ghost sm" data-edit="${p.id}">Sửa</button></div></div>`).join("")}`;
+    }).join("") : `<p class="loading">${products.length ? "Không có sản phẩm khớp." : "Chưa có sản phẩm. Bấm “Thêm sản phẩm” hoặc chạy supabase/seed.sql."}</p>`;
   }
   async function toggleProduct(id, field) {
     const p = products.find(x => x.id === id);
+    if (field === "in_stock" && p.preorder) { toast("Đây là hàng order: luôn nhận đặt. Tắt “Hàng order” trong Sửa sản phẩm nếu muốn ngừng."); return; }
     if (field === "in_stock") {
       const { data: tracked } = await sb.from("inventory").select("stock").eq("product_id", id).maybeSingle();
       if (tracked) { toast(`Sản phẩm này đang quản lý theo kho (còn ${tracked.stock}). Vào mục Kho để nhập hàng hoặc kiểm kê.`); return; }
@@ -179,8 +192,11 @@
     products = products.map(x => (x.id === id ? data : x)); renderProducts(); needRebuild(true);
   }
 
+  let eVars = [];
   function openEditor(p) {
+    p = rootOf(p);
     editing = p ? p.id : null;
+    eVars = p ? kidsOf(p.id).map(k => ({ id: k.id, vol: k.vol || "", price: k.price, sale: k.sale || "", in_stock: k.in_stock, preorder: !!k.preorder, del: false })) : [];
     eImages = p ? [...(p.images || [])] : [];
     p = p || { cat: "skincare", sub: "", brand: "", origin: "", name: "", vol: "", price: "", sale: "", is_new: true, in_stock: true, visible: true, pop: 5, actives: [], skin: [], concerns: [], descr: "", howto: "", ingredients: "", shape: "dropper", tint: "#f2e6d6" };
     const subs = [...new Set([...(CFG.taxonomy?.subs || []), ...products.map(x => x.sub)])];
@@ -195,10 +211,15 @@
         <label class="f" for="e_origin">Xuất xứ<input id="e_origin" value="${esc(p.origin)}" placeholder="Hàn, Nhật, Pháp…"></label>
         <label class="f" for="e_cat">Nhóm<select id="e_cat"><option value="skincare"${p.cat === "skincare" ? " selected" : ""}>Skincare</option><option value="makeup"${p.cat === "makeup" ? " selected" : ""}>Makeup</option></select></label>
         <label class="f" for="e_sub">Danh mục<input id="e_sub" value="${esc(p.sub)}" list="dl_sub" placeholder="Serum, Toner, Môi…" required></label>
-        <label class="f" for="e_vol">Dung tích<input id="e_vol" value="${esc(p.vol)}" placeholder="30ml"></label>
+        <label class="f" for="e_vol">Dung tích / phân loại<input id="e_vol" value="${esc(p.vol)}" placeholder="30ml"></label>
         <label class="f" for="e_pop">Độ bán chạy (1–10)<input id="e_pop" type="number" min="1" max="10" value="${esc(p.pop)}"></label>
         <label class="f" for="e_price">Giá gốc (đ)<input id="e_price" type="number" min="0" step="1000" value="${esc(p.price)}" required></label>
         <label class="f" for="e_sale">Giá sale (đ, để trống nếu không sale)<input id="e_sale" type="number" min="0" step="1000" value="${esc(p.sale || "")}"></label>
+      </div>
+      <div class="f">Phân loại hàng
+        <span class="hint">Thêm khi sản phẩm có nhiều dung tích / màu, mỗi loại có giá và tồn kho riêng. Phân loại đầu tiên là dung tích và giá ở trên.</span>
+        <div class="vars" id="e_vars"></div>
+        <div><button type="button" class="btn ghost sm" id="eAddVar">+ Thêm phân loại</button></div>
       </div>
       <datalist id="dl_sub">${subs.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
       <datalist id="dl_brand">${brands.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
@@ -206,7 +227,9 @@
         <label><input type="checkbox" id="e_visible"${p.visible ? " checked" : ""}>Hiện trên web</label>
         <label><input type="checkbox" id="e_in_stock"${p.in_stock ? " checked" : ""}>Còn hàng</label>
         <label><input type="checkbox" id="e_is_new"${p.is_new ? " checked" : ""}>Hàng mới về</label>
+        <label><input type="checkbox" id="e_preorder"${p.preorder ? " checked" : ""}>Hàng order (khách đặt rồi mới nhập)</label>
       </div>
+      <label class="f" for="e_lead">Thời gian giao hàng order<input id="e_lead" value="${esc(p.lead_time || "")}" placeholder="7–14 ngày"></label>
       <div class="f">Ảnh sản phẩm (ảnh đầu tiên là ảnh chính)<div class="imgs" id="e_imgs"></div></div>
       <label class="f" for="e_actives">Hoạt chất (cách nhau bằng dấu phẩy)<input id="e_actives" value="${esc((p.actives || []).join(", "))}" placeholder="Niacinamide, Kẽm"></label>
       <div class="f">Loại da phù hợp${ck("skin", SKIN, p.skin)}</div>
@@ -218,7 +241,7 @@
         <label class="f" for="e_tint">Màu nền thẻ<input id="e_tint" type="color" value="${esc(p.tint)}"></label>
         <label class="f" for="e_shape">Hình minh hoạ khi chưa có ảnh<select id="e_shape">${SHAPES.map(([k, l]) => `<option value="${k}"${k === p.shape ? " selected" : ""}>${l}</option>`).join("")}</select></label>
       </div>`;
-    renderImgs();
+    renderImgs(); renderVars();
     $("editor").classList.add("on"); $("scrim").classList.add("on");
     setTimeout(() => $("e_name").focus(), 50);
   }
@@ -250,25 +273,67 @@
     if (!v("e_sub")) err.push("Nhập danh mục.");
     if (!(price > 0)) err.push("Nhập giá gốc.");
     if (sale !== null && !(sale > 0 && sale < price)) err.push("Giá sale phải nhỏ hơn giá gốc.");
+    const live = eVars.filter(x => !x.del);
+    if (live.length && !v("e_vol")) err.push("Có phân loại: hãy ghi dung tích / tên cho phân loại đầu tiên.");
+    live.forEach((x, i) => {
+      const pr = Number(x.price), sl = x.sale === "" || x.sale === null ? null : Number(x.sale);
+      if (!String(x.vol).trim()) err.push(`Phân loại ${i + 2}: nhập dung tích / tên.`);
+      if (!(pr > 0)) err.push(`Phân loại ${i + 2}: nhập giá.`);
+      if (sl !== null && !(sl > 0 && sl < pr)) err.push(`Phân loại ${i + 2}: giá sale phải nhỏ hơn giá gốc.`);
+    });
+    const labels = [v("e_vol"), ...live.map(x => String(x.vol).trim())].filter(Boolean).map(norm);
+    if (new Set(labels).size < labels.length) err.push("Hai phân loại đang trùng tên.");
+    if ($("e_preorder").checked && !v("e_lead")) err.push("Hàng order: ghi thời gian giao (ví dụ 7–14 ngày).");
     if (err.length) { $("eErr").textContent = err.join(" "); return; }
     const row = {
       name: v("e_name"), brand: v("e_brand"), origin: v("e_origin"), cat: v("e_cat"), sub: v("e_sub"), vol: v("e_vol"),
       price, sale, pop: Math.max(1, Math.min(10, parseInt(v("e_pop"), 10) || 5)),
       visible: $("e_visible").checked, in_stock: $("e_in_stock").checked, is_new: $("e_is_new").checked,
+      preorder: $("e_preorder").checked, lead_time: v("e_lead"),
       actives: v("e_actives").split(",").map(s => s.trim()).filter(Boolean), skin: checked("skin"), concerns: checked("concerns"),
       images: eImages, descr: v("e_descr"), howto: v("e_howto"), ingredients: v("e_ingredients"), tint: $("e_tint").value, shape: v("e_shape"),
     };
     const btn = $("eSave"); btn.disabled = true; btn.textContent = "Đang lưu…";
     const res = editing ? await sb.from("products").update(row).eq("id", editing).select().single() : await sb.from("products").insert(row).select().single();
     btn.disabled = false; btn.textContent = "Lưu sản phẩm";
-    if (res.error) { $("eErr").textContent = `Không lưu được: ${res.error.message}`; return; }
-    products = editing ? products.map(p => (p.id === editing ? res.data : p)) : [...products, res.data];
-    renderProducts(); closeEditor(); needRebuild(true); toast("Đã lưu sản phẩm");
+    if (res.error) { btn.disabled = false; btn.textContent = "Lưu sản phẩm"; $("eErr").textContent = `Không lưu được: ${res.error.message}`; return; }
+    const vErr = await saveVariants(res.data);
+    const fresh = await sb.from("products").select("*").order("id");
+    products = fresh.error ? (editing ? products.map(p => (p.id === editing ? res.data : p)) : [...products, res.data]) : fresh.data;
+    renderProducts(); needRebuild(true);
+    if (vErr.length) { editing = res.data.id; openEditor(res.data); $("eErr").textContent = `Đã lưu sản phẩm, nhưng phân loại lỗi: ${vErr.join("; ")}`; return; }
+    closeEditor(); toast("Đã lưu sản phẩm");
+  }
+  async function saveVariants(main) {
+    const errs = [];
+    let pos = 1;
+    for (const x of eVars) {
+      try {
+        if (x.del) { if (x.id) { const { error } = await sb.from("products").delete().eq("id", x.id); if (error) throw error; } continue; }
+        const row = { vol: String(x.vol).trim(), price: Number(x.price), sale: x.sale === "" || x.sale === null ? null : Number(x.sale), in_stock: !!x.in_stock, preorder: !!x.preorder, position: pos++ };
+        const r = x.id ? await sb.from("products").update(row).eq("id", x.id).select().single()
+          : await sb.from("products").insert({ ...row, variant_of: main.id, name: main.name, brand: main.brand, cat: main.cat, sub: main.sub }).select().single();
+        if (r.error) throw r.error;
+        x.id = r.data.id;
+      } catch (e) { errs.push(`${x.vol || "phân loại"}: ${e.message}`); }
+    }
+    return errs;
+  }
+  function renderVars() {
+    const live = eVars.map((x, i) => ({ x, i })).filter(o => !o.x.del);
+    $("e_vars").innerHTML = live.map(({ x, i }, n) => `<div class="var-row">
+      <label class="sr" for="vv${i}">Phân loại ${n + 2}</label><input id="vv${i}" data-vf="vol" data-vi="${i}" value="${esc(x.vol)}" placeholder="Phân loại ${n + 2}: 50ml">
+      <label class="sr" for="vp${i}">Giá</label><input id="vp${i}" type="number" min="0" step="1000" data-vf="price" data-vi="${i}" value="${esc(x.price)}" placeholder="Giá gốc">
+      <label class="sr" for="vs${i}">Giá sale</label><input id="vs${i}" type="number" min="0" step="1000" data-vf="sale" data-vi="${i}" value="${esc(x.sale)}" placeholder="Giá sale">
+      <label class="ckl"><input type="checkbox" data-vf="in_stock" data-vi="${i}"${x.in_stock ? " checked" : ""}>Còn hàng</label>
+      <label class="ckl"><input type="checkbox" data-vf="preorder" data-vi="${i}"${x.preorder ? " checked" : ""}>Order</label>
+      <button type="button" class="x" data-vdel="${i}" aria-label="Xoá phân loại ${esc(x.vol)}">×</button></div>`).join("")
+      + (eVars.some(x => x.del && x.id) ? `<p class="hint">Phân loại bị xoá sẽ mất luôn lịch sử kho của phân loại đó khi bấm Lưu.</p>` : "");
   }
   async function deleteProduct() {
     const { error } = await sb.from("products").delete().eq("id", editing);
     if (error) { $("eErr").textContent = `Không xoá được: ${error.message}`; return; }
-    products = products.filter(p => p.id !== editing); renderProducts(); closeEditor(); needRebuild(true); toast("Đã xoá sản phẩm");
+    products = products.filter(p => p.id !== editing && p.variant_of !== editing); renderProducts(); closeEditor(); needRebuild(true); toast("Đã xoá sản phẩm");
   }
   function closeEditor() { $("editor").classList.remove("on"); $("scrim").classList.remove("on"); editing = null; }
 
@@ -333,7 +398,7 @@
     return {
       brand: v("iBrand"), origin: v("iOrigin"), cat: v("iCat") || "auto",
       priceMode: v("iPriceMode") || "keep", pct: Math.max(0, Math.min(90, Number(v("iPct")) || 0)),
-      imgs: $("iImgs") ? $("iImgs").checked : true, visible: $("iVisible") ? $("iVisible").checked : false, skipDup: $("iSkipDup") ? $("iSkipDup").checked : true,
+      imgs: $("iImgs") ? $("iImgs").checked : true, detail: $("iDetail") ? $("iDetail").checked : true, visible: $("iVisible") ? $("iVisible").checked : false, skipDup: $("iSkipDup") ? $("iSkipDup").checked : true,
     };
   }
   async function openImport() {
@@ -362,10 +427,11 @@
       const have = new Set(products.map(p => LI.norm(p.name)));
       const seen = new Set();
       imp.platform = platform;
-      imp.rows = items.filter(it => it.name && !seen.has(it.key) && seen.add(it.key)).map(it => {
-        const { sub } = LI.pickSub(it.name, it.type, it.tags);
-        const dup = have.has(LI.norm(it.name));
-        return { item: it, name: it.name, vol: it.vol || "", sub, dup, sel: !dup && it.price > 0 };
+      const groups = new Map();
+      items.filter(it => it.name && !seen.has(it.key) && seen.add(it.key)).forEach(it => { const k = it.group || it.key; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(it); });
+      imp.rows = [...groups.values()].map(g => {
+        const it = g[0], { sub } = LI.pickSub(it.name, it.type, it.tags), dup = have.has(LI.norm(it.name));
+        return { item: it, variants: g.slice(1), name: it.name, vol: it.label || it.vol || "", sub, dup, sel: !dup && it.price > 0 };
       });
       iStatus("");
       renderImport(url);
@@ -390,6 +456,7 @@
         </div>
         <div class="cks">
           <label><input type="checkbox" id="iImgs" checked>Tải ảnh về kho ảnh của shop</label>
+          <label><input type="checkbox" id="iDetail" checked>Lấy thêm Cách dùng & Thành phần từ trang sản phẩm (chậm hơn)</label>
           <label><input type="checkbox" id="iVisible">Hiện ngay trên web</label>
           <label><input type="checkbox" id="iSkipDup" checked>Bỏ qua sản phẩm đã có</label>
         </div>
@@ -409,6 +476,7 @@
             <div class="i-meta">
               <label class="sr" for="iv${i}">Dung tích</label><input id="iv${i}" class="i-vol" data-ifield="vol" data-i="${i}" value="${esc(r.vol)}" placeholder="Dung tích">
               <label class="sr" for="is${i}">Danh mục</label><select id="is${i}" data-ifield="sub" data-i="${i}">${subs.map(s => `<option${s === r.sub ? " selected" : ""}>${esc(s)}</option>`).join("")}</select>
+              ${r.variants.length ? `<span class="st-chip">${r.variants.length + 1} phân loại: ${esc([r.vol, ...r.variants.map(v => v.label || v.vol)].filter(Boolean).join(", "))}</span>` : ""}
               ${r.dup ? `<span class="st-chip warn">Đã có</span>` : ""}${r.item.available ? "" : `<span class="st-chip">Hãng hết hàng</span>`}${r.item.price ? "" : `<span class="st-chip bad">Không có giá</span>`}
             </div>
           </div>
@@ -431,6 +499,8 @@
       const vis = !q || LI.norm(r.name).includes(q);
       row.hidden = !vis; if (vis) shown++;
       const { price, sale } = LI.calcPrice(r.item, o);
+      const fam = [r.item, ...r.variants].map(x => { const c = LI.calcPrice(x, o); return c.sale || c.price; });
+      if (r.variants.length && new Set(fam).size > 1) { row.querySelector(`[data-price="${i}"]`).innerHTML = `<strong>${vnd(Math.min(...fam))}</strong><br><span class="muted">– ${vnd(Math.max(...fam))}</span>`; return; }
       row.querySelector(`[data-price="${i}"]`).innerHTML = price ? (sale ? `<s class="muted">${vnd(price)}</s><br><strong>${vnd(sale)}</strong>` : `<strong>${vnd(price)}</strong>`) : `<span class="muted">—</span>`;
       row.classList.toggle("skip", o.skipDup && r.dup);
     });
@@ -472,7 +542,12 @@
     for (const [n, r] of chosen.entries()) {
       $("iProg").textContent = `Đang nhập ${n + 1}/${chosen.length}: ${r.name}`;
       try {
-        const p = LI.toProduct({ ...r.item, name: r.name.trim() || r.item.name, vol: r.vol.trim() }, o);
+        let extra = null;
+        if (o.detail && r.item.sourceUrl) {
+          $("iProg").textContent = `Đang nhập ${n + 1}/${chosen.length}: ${r.name} (đọc trang sản phẩm…)`;
+          try { extra = LI.extractPage(await (await proxy(r.item.sourceUrl)).text()); } catch (e) { console.warn("Không đọc được trang sản phẩm", e); }
+        }
+        const p = LI.toProduct({ ...r.item, extra, name: r.name.trim() || r.item.name, vol: r.vol.trim() }, o);
         p.sub = r.sub;
         p.cat = o.cat !== "auto" ? o.cat : LI.MAKEUP.includes(r.sub) ? "makeup" : "skincare";
         if (p.cat === "makeup") p.concerns = [];
@@ -481,6 +556,12 @@
         const { data, error } = await sb.from("products").insert(p).select().single();
         if (error) throw error;
         products.push(data); r.dup = true; r.sel = false; ok++;
+        for (const [k, v] of r.variants.entries()) {
+          const pr = LI.calcPrice(v, o);
+          const res2 = await sb.from("products").insert({ variant_of: data.id, name: data.name, brand: data.brand, cat: data.cat, sub: data.sub,
+            vol: v.label || v.vol || `Phân loại ${k + 2}`, price: pr.price, sale: pr.sale, in_stock: v.available, position: k + 1 }).select().single();
+          if (res2.error) errs.push(`${r.name} (${v.label || "phân loại"}): ${res2.error.message}`); else products.push(res2.data);
+        }
         const el = $("iList").querySelector(`[data-row="${imp.rows.indexOf(r)}"]`);
         if (el) { el.classList.add("dup"); el.querySelector("[data-isel]").checked = false; el.querySelector(".i-meta").insertAdjacentHTML("beforeend", `<span class="st-chip good">Đã nhập</span>`); }
       } catch (e) { errs.push(`${r.name}: ${e.message}`); }
@@ -515,7 +596,9 @@
   const stockState = p => {
     const r = inv[p.id];
     if (!r) return { key: "untracked", label: "Chưa quản lý kho", cls: "" };
-    if (r.stock <= 0) return { key: "out", label: r.stock < 0 ? `Âm ${-r.stock}` : "Hết hàng", cls: "bad" };
+    if (r.stock < 0) return { key: "need", label: `Cần nhập ${-r.stock} (khách đã đặt)`, cls: "bad" };
+    if (r.stock === 0 && p.preorder) return { key: "order", label: "Hàng order · 0", cls: "" };
+    if (r.stock <= 0) return { key: "out", label: "Hết hàng", cls: "bad" };
     if (r.stock <= r.low_stock) return { key: "low", label: `Sắp hết · còn ${r.stock}`, cls: "warn" };
     return { key: "ok", label: `Còn ${r.stock}`, cls: "good" };
   };
@@ -539,21 +622,23 @@
     const tracked = products.filter(p => inv[p.id]);
     const units = tracked.reduce((n, p) => n + Math.max(0, inv[p.id].stock), 0);
     const value = tracked.reduce((n, p) => n + Math.max(0, inv[p.id].stock) * inv[p.id].cost, 0);
-    const low = products.filter(p => stockState(p).key === "low"), out = products.filter(p => stockState(p).key === "out");
-    $("lowCount").textContent = low.length + out.length; $("lowCount").hidden = !(low.length + out.length);
+    const low = products.filter(p => stockState(p).key === "low"), out = products.filter(p => stockState(p).key === "out"), need = products.filter(p => stockState(p).key === "need");
+    const needUnits = need.reduce((n, p) => n - inv[p.id].stock, 0);
+    $("lowCount").textContent = low.length + out.length + need.length; $("lowCount").hidden = !(low.length + out.length + need.length);
     $("kTiles").innerHTML = [
       ["Đang quản lý kho", `${tracked.length}<small>/${products.length} sản phẩm</small>`],
       ["Tổng tồn", `${units.toLocaleString("vi-VN")}<small> sản phẩm</small>`],
       ["Giá trị tồn (giá vốn)", vnd(value)],
       ["Sắp hết", `${low.length}`, low.length ? "warn" : ""],
       ["Hết hàng", `${out.length}`, out.length ? "bad" : ""],
+      ["Cần nhập cho khách order", `${needUnits}<small> sản phẩm · ${need.length} mã</small>`, need.length ? "bad" : ""],
     ].map(([l, v, c]) => `<div class="tile ${c || ""}"><span>${l}</span><strong>${v}</strong></div>`).join("");
-    const counts = { all: products.length, low: low.length, out: out.length, untracked: products.length - tracked.length };
-    $("kFilter").innerHTML = [["all", "Tất cả"], ["low", "Sắp hết"], ["out", "Hết hàng"], ["untracked", "Chưa quản lý kho"]]
+    const counts = { all: products.length, need: need.length, low: low.length, out: out.length, order: products.filter(p => p.preorder).length, untracked: products.length - tracked.length };
+    $("kFilter").innerHTML = [["all", "Tất cả"], ["need", "Cần nhập"], ["low", "Sắp hết"], ["out", "Hết hàng"], ["order", "Hàng order"], ["untracked", "Chưa quản lý kho"]]
       .map(([k, l]) => `<button type="button" class="chip" data-kf="${k}" aria-pressed="${kFilter === k}">${l}<b>${counts[k]}</b></button>`).join("");
     const q = norm(kQuery);
-    const order = { out: 0, low: 1, ok: 2, untracked: 3 };
-    const list = products.filter(p => (kFilter === "all" || stockState(p).key === kFilter) && (!q || norm(`${p.name} ${p.brand} ${inv[p.id]?.sku || ""}`).includes(q)))
+    const order = { need: 0, out: 1, low: 2, order: 3, ok: 4, untracked: 5 };
+    const list = products.filter(p => (kFilter === "all" || (kFilter === "order" ? p.preorder : stockState(p).key === kFilter)) && (!q || norm(`${p.name} ${p.brand} ${inv[p.id]?.sku || ""}`).includes(q)))
       .sort((a, b) => order[stockState(a).key] - order[stockState(b).key] || a.name.localeCompare(b.name, "vi"));
     $("kList").innerHTML = list.length ? `<div class="k-head" aria-hidden="true"><span>Sản phẩm</span><span>Tồn kho</span><span>Giá vốn</span><span>Bán 30 ngày</span><span></span></div>` + list.map(p => {
       const r = inv[p.id], st = stockState(p), s30 = sold30[p.id] || 0;
@@ -792,12 +877,13 @@
     if (error) { $("sErr").textContent = error.message; return; }
     $("sShip").value = data.ship_fee; $("sFee").value = data.cod_fee; $("sFrom").value = data.cod_deposit_from;
     $("sRate").value = Math.round(Number(data.cod_deposit_rate) * 100); $("sMax").value = data.cod_max;
+    $("sPre").value = Math.round(Number(data.preorder_deposit_rate ?? 0.5) * 100);
   }
   $("sForm").addEventListener("submit", async e => {
     e.preventDefault();
     const n = id => parseInt($(id).value, 10);
-    const row = { ship_fee: n("sShip"), cod_fee: n("sFee"), cod_deposit_from: n("sFrom"), cod_deposit_rate: n("sRate") / 100, cod_max: n("sMax"), updated_at: new Date().toISOString() };
-    if (Object.values(row).some(x => typeof x === "number" && !(x >= 0)) || row.cod_deposit_rate > 1) { $("sErr").textContent = "Kiểm tra lại các số (không âm, tỷ lệ cọc 0–100%)."; return; }
+    const row = { ship_fee: n("sShip"), cod_fee: n("sFee"), cod_deposit_from: n("sFrom"), cod_deposit_rate: n("sRate") / 100, cod_max: n("sMax"), preorder_deposit_rate: n("sPre") / 100, updated_at: new Date().toISOString() };
+    if (Object.values(row).some(x => typeof x === "number" && !(x >= 0)) || row.cod_deposit_rate > 1 || row.preorder_deposit_rate > 1) { $("sErr").textContent = "Kiểm tra lại các số (không âm, tỷ lệ cọc 0–100%)."; return; }
     const { error } = await sb.from("shop_settings").update(row).eq("id", 1);
     if (error) { $("sErr").textContent = error.message; return; }
     $("sErr").textContent = ""; needRebuild(true); toast("Đã lưu cài đặt");
@@ -845,6 +931,8 @@
     else if (d.tg) toggleProduct(Number(d.pid), d.tg);
     else if (d.edit) openEditor(products.find(p => p.id === Number(d.edit)));
     else if (t.id === "pNew") openEditor(null);
+    else if (t.id === "eAddVar") { eVars.push({ vol: "", price: $("e_price").value || "", sale: "", in_stock: true, preorder: false, del: false }); renderVars(); const ins = $("e_vars").querySelectorAll('[data-vf="vol"]'); ins[ins.length - 1].focus(); }
+    else if (d.vdel !== undefined) { const x = eVars[Number(d.vdel)]; if (x.id) x.del = true; else eVars.splice(Number(d.vdel), 1); renderVars(); }
     else if (t.id === "eClose") closeEditor();
     else if (t.id === "eDel") $("eDelConfirm").hidden = false;
     else if (t.id === "eDelNo") $("eDelConfirm").hidden = true;
@@ -886,6 +974,7 @@
     }
     else if (t.id === "e_upload") upload(t.files);
     else if (t.id === "kKind") syncKindForm();
+    else if (d.vf) eVars[Number(d.vi)][d.vf] = t.type === "checkbox" ? t.checked : t.value;
   });
   $("eForm").addEventListener("submit", e => { e.preventDefault(); saveProduct(); });
   document.addEventListener("submit", e => {

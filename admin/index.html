@@ -114,6 +114,7 @@
           <label class="f" for="sFrom">COD phải cọc từ (đ)<input id="sFrom" type="number" min="0" step="10000"></label>
           <label class="f" for="sRate">Tỷ lệ cọc (%)<input id="sRate" type="number" min="0" max="100" step="5"></label>
           <label class="f" for="sMax">Đơn trên mức này chỉ nhận chuyển khoản (đ)<input id="sMax" type="number" min="0" step="100000"></label>
+          <label class="f" for="sPre">Đơn có hàng order: cọc trước (%)<input id="sPre" type="number" min="0" max="100" step="5"></label>
         </div>
         <p class="hint">Chuyển khoản trước luôn miễn phí giao hàng. Đổi xong nhớ bấm “Cập nhật web” để chữ trên web khớp số mới. Quy tắc tính tiền áp dụng ngay.</p>
         <p class="err" id="sErr" role="alert"></p>
@@ -130,7 +131,7 @@
   <div class="df">
     <p class="err" id="eErr" role="alert"></p>
     <div class="e-actions"><button class="btn" type="submit" form="eForm" id="eSave">Lưu sản phẩm</button><button class="btn ghost" type="button" id="eDel">Xoá</button></div>
-    <div id="eDelConfirm" class="confirm" hidden>Xoá vĩnh viễn sản phẩm này? Nếu chỉ muốn tạm ngừng bán, hãy tắt “Hiện trên web”.
+    <div id="eDelConfirm" class="confirm" hidden>Xoá vĩnh viễn sản phẩm này cùng tất cả phân loại? Nếu chỉ muốn tạm ngừng bán, hãy tắt “Hiện trên web”.
       <div class="e-actions"><button class="btn danger" type="button" id="eDelYes">Xoá vĩnh viễn</button><button class="btn ghost" type="button" id="eDelNo">Không xoá</button></div></div>
   </div>
 </aside>

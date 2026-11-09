@@ -39,12 +39,14 @@ const get = async p => {
     price: r.price, ...(r.sale ? { sale: r.sale } : {}), isNew: r.is_new, inStock: r.in_stock, pop: r.pop,
     actives: r.actives || [], skin: r.skin || [], concerns: r.concerns || [], images: r.images || [],
     desc: r.descr, howto: r.howto, ingredients: r.ingredients, shape: r.shape, tint: r.tint,
+    ...(r.variant_of ? { variantOf: r.variant_of } : {}), position: r.position || 0,
+    ...(r.preorder ? { preorder: true } : {}), leadTime: r.lead_time || "",
   }));
   fs.mkdirSync(cache, { recursive: true });
   fs.writeFileSync(path.join(cache, "products.json"), JSON.stringify(products));
   const s = settings[0];
   if (s) fs.writeFileSync(path.join(cache, "settings.json"), JSON.stringify({
-    shipFee: s.ship_fee, codFee: s.cod_fee, codDepositFrom: s.cod_deposit_from, codDepositRate: Number(s.cod_deposit_rate), codMax: s.cod_max,
+    shipFee: s.ship_fee, codFee: s.cod_fee, codDepositFrom: s.cod_deposit_from, codDepositRate: Number(s.cod_deposit_rate), codMax: s.cod_max, preorderDepositRate: Number(s.preorder_deposit_rate ?? 0.5),
   }));
   console.log(`✓ Lấy ${products.length} sản phẩm từ Supabase`);
 })().catch(e => {

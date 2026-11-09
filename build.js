@@ -9,7 +9,7 @@ const SITE = JSON.parse(fs.readFileSync(path.join(ROOT, "site.json"), "utf8"));
 if (process.env.SITE_URL) SITE.url = process.env.SITE_URL; // đổi tên miền không cần sửa code
 const CACHE = path.join(ROOT, ".cache");
 const fromDB = fs.existsSync(path.join(CACHE, "products.json"));
-const P = JSON.parse(fs.readFileSync(fromDB ? path.join(CACHE, "products.json") : path.join(ROOT, "data/products.json"), "utf8"));
+const ALL = JSON.parse(fs.readFileSync(fromDB ? path.join(CACHE, "products.json") : path.join(ROOT, "data/products.json"), "utf8"));
 if (fs.existsSync(path.join(CACHE, "settings.json"))) Object.assign(SITE.order, JSON.parse(fs.readFileSync(path.join(CACHE, "settings.json"), "utf8")));
 const SB = { url: (process.env.SUPABASE_URL || SITE.supabase?.url || "").replace(/\/$/, ""), anonKey: process.env.SUPABASE_ANON_KEY || SITE.supabase?.anonKey || "" };
 const T = JSON.parse(fs.readFileSync(path.join(ROOT, "data/taxonomy.json"), "utf8"));
@@ -40,11 +40,25 @@ const pct = p => (p.sale ? Math.round((1 - p.sale / p.price) * 100) : 0);
 const uniq = a => [...new Set(a)];
 const CAT_NAME = { skincare: "Skincare", makeup: "Makeup" };
 
+// Phân loại hàng: dòng có variantOf là phân loại của sản phẩm chính. Chỉ sản phẩm chính có thẻ và trang riêng.
+const P = ALL.filter(p => !p.variantOf || !ALL.some(x => x.id === p.variantOf));
 P.forEach(p => {
   p.slug = slug(`${p.name} ${p.brand}`);
   p.url = `/san-pham/${p.slug}/`;
   p.images = p.images || [];
-  p.inStock = p.inStock !== false;
+  p.ownStock = p.inStock !== false;
+  const kids = ALL.filter(k => k.variantOf === p.id).sort((a, b) => (a.position || 0) - (b.position || 0) || priceOf(a) - priceOf(b));
+  kids.forEach(k => {
+    Object.assign(k, { name: p.name, brand: p.brand, origin: p.origin, cat: p.cat, sub: p.sub, isNew: p.isNew, pop: p.pop, actives: p.actives, skin: p.skin, concerns: p.concerns, shape: p.shape, tint: p.tint, url: p.url, images: p.images, leadTime: p.leadTime });
+    k.ownStock = k.inStock !== false;
+  });
+  p.family = [p, ...kids];
+  p.family.forEach(m => (m.orderable = m.ownStock || !!m.preorder));
+  p.inStock = p.family.some(m => m.orderable);
+  p.allOrder = p.family.every(m => m.preorder || !m.ownStock) && p.family.some(m => m.preorder);
+  p.minPrice = Math.min(...p.family.map(priceOf));
+  p.multiPrice = new Set(p.family.map(priceOf)).size > 1;
+  p.anySale = p.family.some(m => m.sale);
 });
 const subUrl = (cat, sub) => `/${cat}/${slug(sub)}/`;
 const needUrl = k => `/nhu-cau/${slug(k)}/`;
@@ -80,16 +94,18 @@ function card(p) {
   if (p.isNew) tags.push(`<span class="tag new">Mới về</span>`);
   if (p.pop >= 10 && tags.length < 2) tags.push(`<span class="tag">Bán chạy</span>`);
   if (!p.inStock) tags.unshift(`<span class="tag">Hết hàng</span>`);
+  else if (p.allOrder) tags.unshift(`<span class="tag">Hàng order</span>`);
+  const many = p.family.length > 1;
   return `<article class="card" data-id="${p.id}">
   <div class="shot" style="background:${p.tint}">
     <a href="${p.url}" tabindex="-1" aria-hidden="true">${picture(p)}</a>
     ${tags.length ? `<div class="tags">${tags.join("")}</div>` : ""}
-    ${p.inStock ? `<button class="add" data-add="${p.id}" aria-label="Thêm ${esc(p.name)} vào giỏ">Thêm vào giỏ</button>` : `<button class="add" disabled>Hết hàng</button>`}
+    ${!p.inStock ? `<button class="add" disabled>Hết hàng</button>` : many ? `<a class="add" href="${p.url}" aria-label="Chọn phân loại ${esc(p.name)}">Chọn phân loại</a>` : `<button class="add" data-add="${p.id}" aria-label="${p.preorder ? "Đặt trước" : "Thêm vào giỏ"} ${esc(p.name)}">${p.preorder ? "Đặt trước" : "Thêm vào giỏ"}</button>`}
   </div>
-  <div class="meta"><a class="brand" href="${brandUrl(p.brand)}">${esc(p.brand)}</a><span class="vol">${esc(p.origin)} · ${esc(p.vol)}</span></div>
+  <div class="meta"><a class="brand" href="${brandUrl(p.brand)}">${esc(p.brand)}</a><span class="vol">${esc([p.origin, many ? `${p.family.length} phân loại` : p.vol].filter(Boolean).join(" · "))}</span></div>
   <h3><a href="${p.url}">${esc(p.name)}</a></h3>
   ${p.actives.length ? `<div class="actives">${p.actives.slice(0, 2).map(a => `<span>${esc(a)}</span>`).join("")}</div>` : ""}
-  <div class="prices"><span class="price${p.sale ? " on-sale" : ""}">${vnd(priceOf(p))}</span>${p.sale ? `<s>${vnd(p.price)}</s>` : ""}</div>
+  <div class="prices">${p.multiPrice ? `<span class="price">Từ ${vnd(p.minPrice)}</span>` : `<span class="price${p.sale ? " on-sale" : ""}">${vnd(priceOf(p))}</span>${p.sale ? `<s>${vnd(p.price)}</s>` : ""}`}</div>
 </article>`;
 }
 const grid = (list, cls = "") => `<div class="grid ${cls}">${list.map(card).join("")}</div>`;
@@ -357,8 +373,13 @@ for (const p of P) {
   const related = P.filter(x => x.id !== p.id).map(x => ({ x, s: (x.sub === p.sub ? 2 : 0) + x.concerns.filter(c => p.concerns.includes(c)).length * 2 + (x.cat === p.cat ? 1 : 0) + x.pop / 20 }))
     .sort((a, b) => b.s - a.s).slice(0, 4).map(r => r.x);
   const links = (arr, fn) => arr.map(v => `<a href="${fn(v)}">${esc(v)}</a>`).join(", ");
-  const title = `${p.name} ${p.brand} ${p.vol}`;
-  const desc = `${p.name} ${p.brand} chính hãng, giá ${vnd(priceOf(p))}. ${oneLine(p.desc)}`.slice(0, 158);
+  const many = p.family.length > 1;
+  const d = p.family.find(m => m.ownStock && !m.preorder) || p.family.find(m => m.orderable) || p; // phân loại chọn sẵn
+  const preRate = Math.round((SITE.order.preorderDepositRate ?? 0.5) * 100);
+  const preNote = m => `Hàng order: shop nhập về sau khi bạn đặt, giao sau ${esc(m.leadTime || p.leadTime || "7–14 ngày")}.${preRate ? ` Đơn có hàng order cần cọc trước ${preRate}%.` : ""}`;
+  const title = many ? `${p.name} ${p.brand}` : `${p.name} ${p.brand} ${p.vol}`;
+  const desc = `${p.name} ${p.brand} chính hãng, giá ${p.multiPrice ? "từ " : ""}${vnd(p.minPrice)}. ${oneLine(p.desc)}`.slice(0, 158);
+  const priceHtml = m => `<span class="price${m.sale ? " on-sale" : ""}">${vnd(priceOf(m))}</span>${m.sale ? `<s>${vnd(m.price)}</s><span class="badge-off">−${pct(m)}%</span>` : ""}`;
   const body = `<div class="wrap">
   ${bc.html}
   <div class="pdp">
@@ -367,18 +388,23 @@ for (const p of P) {
     <div>
       <a class="brand" href="${brandUrl(p.brand)}">${esc(p.brand)}</a>
       <h1 class="display">${esc(p.name)}</h1>
-      <div class="prices"><span class="price${p.sale ? " on-sale" : ""}">${vnd(priceOf(p))}</span>${p.sale ? `<s>${vnd(p.price)}</s><span class="badge-off">−${pct(p)}%</span>` : ""}</div>
+      <div class="prices" id="pdPrice">${priceHtml(d)}</div>
       <div class="prose lead-desc">${rich(p.desc)}</div>
+      ${many ? `<div class="variants" data-variants="${p.id}" role="group" aria-label="Chọn phân loại">
+        <p class="eyebrow">Phân loại</p>
+        <div class="vchips">${p.family.map(m => `<button type="button" class="vchip" data-vid="${m.id}" aria-pressed="${m.id === d.id}"${m.orderable ? "" : " disabled"}><b>${esc(m.vol || "Mặc định")}</b><small>${m.preorder ? `Order · ${vnd(priceOf(m))}` : m.ownStock ? vnd(priceOf(m)) : "Hết hàng"}</small></button>`).join("")}</div>
+      </div>` : ""}
+      <p class="note pre" id="pdPre"${d.preorder ? "" : " hidden"}>${preNote(d)}</p>
       ${p.inStock ? `<div class="buy" data-buy="${p.id}">
         <div class="qty"><button type="button" data-step="-1" aria-label="Giảm số lượng">−</button><output id="pq">1</output><button type="button" data-step="1" aria-label="Tăng số lượng">+</button></div>
-        <button class="btn dark" type="button" data-add-qty="${p.id}">Thêm vào giỏ</button>
-        <button class="btn" type="button" data-buy-now="${p.id}">Mua ngay</button>
+        <button class="btn dark" type="button" data-add-qty="${d.id}">${d.preorder ? "Đặt trước" : "Thêm vào giỏ"}</button>
+        <button class="btn" type="button" data-buy-now="${d.id}">${d.preorder ? "Đặt trước & thanh toán" : "Mua ngay"}</button>
       </div>` : `<p class="note">Tạm hết hàng. Nhắn Zalo ${esc(SITE.zalo)} để được báo khi có hàng.</p>`}
       <p class="pay-note"><strong>Chuyển khoản trước: miễn phí giao hàng.</strong> COD: ship ${vnd(SITE.order.shipFee)} + phí thu hộ ${vnd(SITE.order.codFee)}.</p>
       <dl class="facts">
         <dt>Thương hiệu</dt><dd><a href="${brandUrl(p.brand)}">${esc(p.brand)}</a></dd>
         <dt>Xuất xứ</dt><dd>${esc(p.origin)}</dd>
-        <dt>Dung tích</dt><dd>${esc(p.vol)}</dd>
+        <dt>${many ? "Phân loại" : "Dung tích"}</dt><dd id="pdVol">${esc(many ? p.family.map(m => m.vol).filter(Boolean).join(", ") : p.vol)}</dd>
         <dt>Danh mục</dt><dd><a href="${subUrl(p.cat, p.sub)}">${esc(p.sub)}</a></dd>
         ${p.skin.length ? `<dt>Loại da</dt><dd>${esc(p.skin.join(", "))}</dd>` : ""}
         ${p.actives.length ? `<dt>Hoạt chất</dt><dd>${links(p.actives, activeUrl)}</dd>` : ""}
@@ -396,8 +422,14 @@ for (const p of P) {
     "@context": "https://schema.org", "@type": "Product", name: `${p.name} ${p.brand}`, description: oneLine(p.desc), sku: `LUNA-${p.id}`,
     brand: { "@type": "Brand", name: p.brand }, category: `${CAT_NAME[p.cat]} > ${p.sub}`, countryOfOrigin: p.origin,
     ...(p.images.length ? { image: p.images.map(i => (i.startsWith("http") ? i : BASE + i)) } : {}),
-    offers: { "@type": "Offer", url: BASE + p.url, priceCurrency: "VND", price: priceOf(p), itemCondition: "https://schema.org/NewCondition",
-      availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", seller: { "@type": "Organization", name: SITE.name } },
+    offers: (() => {
+      const offer = m => ({ "@type": "Offer", url: BASE + p.url, priceCurrency: "VND", price: priceOf(m), itemCondition: "https://schema.org/NewCondition",
+        availability: m.preorder ? "https://schema.org/PreOrder" : m.ownStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", seller: { "@type": "Organization", name: SITE.name }, ...(many && m.vol ? { name: m.vol } : {}) });
+      if (!many) return offer(p);
+      const prices = p.family.map(priceOf);
+      return { "@type": "AggregateOffer", priceCurrency: "VND", lowPrice: Math.min(...prices), highPrice: Math.max(...prices), offerCount: p.family.length,
+        availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", offers: p.family.map(offer) };
+    })(),
   };
   write(p.url, layout({ title, desc, url: p.url, body, ld: [bc.ld, product], image: p.images[0] }), { priority: 0.9 });
 }
@@ -456,8 +488,9 @@ write("/404.html", layout({ title: "Không tìm thấy trang", desc: "Trang khô
 
 /* Dữ liệu cho trình duyệt (giỏ hàng, bộ lọc, thanh toán) */
 fs.mkdirSync(path.join(OUT, "assets"), { recursive: true });
-const pub = P.map(p => ({ id: p.id, cat: p.cat, sub: p.sub, brand: p.brand, origin: p.origin, name: p.name, vol: p.vol, price: p.price, sale: p.sale || 0,
-  isNew: !!p.isNew, pop: p.pop, actives: p.actives, skin: p.skin, concerns: p.concerns, url: p.url, img: p.images[0] || "", shape: p.shape, tint: p.tint, inStock: p.inStock }));
+const pub = ALL.filter(p => p.url).map(p => ({ id: p.id, cat: p.cat, sub: p.sub, brand: p.brand, origin: p.origin, name: p.name, vol: p.vol, price: p.price, sale: p.sale || 0,
+  isNew: !!p.isNew, pop: p.pop, actives: p.actives, skin: p.skin, concerns: p.concerns, url: p.url, img: p.images[0] || "", shape: p.shape, tint: p.tint, inStock: p.ownStock !== false, preorder: !!p.preorder, lead: p.leadTime || "",
+  parent: P.includes(p) ? 0 : p.variantOf, pos: p.position || 0 }));
 const cfg = { ...SITE.order, zalo: SITE.zalo, shopName: SITE.name, carriers: SITE.carriers || [], supabase: SB.url && SB.anonKey ? SB : null };
 fs.writeFileSync(path.join(OUT, "assets/data.js"),
   `window.LUNA=${JSON.stringify({ products: pub, cfg, needs: T.needs.map(n => ({ name: n.name, hint: n.hint })), art: ACCENT })};`);

@@ -67,13 +67,29 @@ Link xem hành trình của từng hãng nằm trong `site.json` → `carriers` 
 
 Admin → **Sản phẩm** → **Nhập từ web hãng**. Dán link trang danh mục (ví dụ `https://www.obagi.vn/collections/shop-all`) hoặc link một trang sản phẩm, bấm **Tải danh sách sản phẩm**.
 - Hỗ trợ web làm bằng **Shopify** (obagi.vn…), **WooCommerce**, và trang sản phẩm có dữ liệu chuẩn (JSON-LD). Web khác: dán link từng trang sản phẩm.
-- Tự lấy: tên, dung tích, giá (cả giá gốc nếu hãng đang giảm), ảnh, mô tả, cách dùng, thành phần. Tự đoán danh mục, hoạt chất, nhu cầu, loại da. Bỏ phần "gợi ý routine", link bài viết của hãng.
+- Tự lấy: tên, dung tích, giá (cả giá gốc nếu hãng đang giảm), ảnh, mô tả. Bật "Lấy thêm Cách dùng & Thành phần" để mở trang từng sản phẩm của hãng lấy hai mục này (từ tab / accordion hoặc khối "Hướng dẫn sử dụng"). Sản phẩm có nhiều biến thể (dung tích) được gom thành phân loại. Tự đoán danh mục, hoạt chất, nhu cầu, loại da. Bỏ phần "gợi ý routine", link bài viết của hãng.
 - Trước khi nhập: sửa tên, dung tích, danh mục từng món; chọn thương hiệu, xuất xứ, giá bán (giữ giá hãng hoặc giảm x%) cho cả lần nhập.
 - Ảnh được chép về kho ảnh của shop (Supabase Storage), không phụ thuộc web hãng.
 - Mặc định nhập ở chế độ **ẩn**: kiểm tra, viết lại mô tả, nhập kho rồi mới bật "Hiện trên web" và bấm Cập nhật web.
 - Sản phẩm trùng tên với sản phẩm đã có được gắn "Đã có" và bỏ qua.
 
 Lưu ý: nên viết lại mô tả bằng lời của shop (Google ưu tiên nội dung riêng), và chỉ dùng ảnh khi được hãng hoặc nhà phân phối cho phép. Một số web chặn máy chủ đọc tự động; khi đó dán link từng trang sản phẩm hoặc thêm tay.
+
+## Phân loại hàng (dung tích, màu…)
+
+Admin → Sản phẩm → **Sửa** → mục **Phân loại hàng** → **+ Thêm phân loại**. Mỗi phân loại có tên (ví dụ 50ml), giá, giá sale, còn hàng / hàng order riêng. Phân loại đầu tiên là dung tích và giá của chính sản phẩm.
+- Web: thẻ sản phẩm ghi "Từ <giá thấp nhất>" và nút **Chọn phân loại**; trang sản phẩm có các nút chọn phân loại, giá đổi theo lựa chọn.
+- Kho: mỗi phân loại có tồn kho, giá vốn riêng (mục Kho hiện từng phân loại).
+- Đơn hàng, tra cứu, thống kê ghi rõ phân loại (ví dụ "Kem chống nắng · 30ml").
+- Tên, thương hiệu, danh mục, ẩn/hiện của phân loại luôn theo sản phẩm chính.
+
+## Hàng order (không có sẵn, khách đặt rồi mới nhập)
+
+Sửa sản phẩm → tick **Hàng order** và ghi **Thời gian giao hàng order** (ví dụ 7–14 ngày). Có thể đặt riêng cho từng phân loại (cột "Order").
+- Web: nhãn "Hàng order", nút **Đặt trước**, ghi chú thời gian giao. Không bao giờ hiện "Hết hàng".
+- Thanh toán: đơn có hàng order mà chọn COD phải **cọc trước** (mặc định 50%, đổi ở Cài đặt → "Đơn có hàng order: cọc trước"). Chuyển khoản thì trả đủ như bình thường.
+- Kho: hàng order vẫn bán khi kho = 0; kho chuyển thành số âm = số khách đã đặt chờ nhập. Mục Kho → bộ lọc **Cần nhập** cho biết cần nhập bao nhiêu cái. Nhập hàng về thì số tự trừ dần.
+- Đơn hàng: món order có nhãn "Order". Khi đang đợi hàng, chuyển đơn sang **Chờ hàng về** để khách tra cứu thấy.
 
 ## Quản lý kho
 
