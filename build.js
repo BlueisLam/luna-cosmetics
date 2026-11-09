@@ -94,13 +94,12 @@ function card(p) {
   if (p.isNew) tags.push(`<span class="tag new">Mới về</span>`);
   if (p.pop >= 10 && tags.length < 2) tags.push(`<span class="tag">Bán chạy</span>`);
   if (!p.inStock) tags.unshift(`<span class="tag">Hết hàng</span>`);
-  else if (p.allOrder) tags.unshift(`<span class="tag">Hàng order</span>`);
   const many = p.family.length > 1;
   return `<article class="card" data-id="${p.id}">
   <div class="shot" style="background:${p.tint}">
     <a href="${p.url}" tabindex="-1" aria-hidden="true">${picture(p)}</a>
     ${tags.length ? `<div class="tags">${tags.join("")}</div>` : ""}
-    ${!p.inStock ? `<button class="add" disabled>Hết hàng</button>` : many ? `<a class="add" href="${p.url}" aria-label="Chọn phân loại ${esc(p.name)}">Chọn phân loại</a>` : `<button class="add" data-add="${p.id}" aria-label="${p.preorder ? "Đặt trước" : "Thêm vào giỏ"} ${esc(p.name)}">${p.preorder ? "Đặt trước" : "Thêm vào giỏ"}</button>`}
+    ${!p.inStock ? `<button class="add" disabled>Hết hàng</button>` : many ? `<a class="add" href="${p.url}" aria-label="Chọn phân loại ${esc(p.name)}">Chọn phân loại</a>` : `<button class="add" data-add="${p.id}" aria-label="Thêm ${esc(p.name)} vào giỏ">Thêm vào giỏ</button>`}
   </div>
   <div class="meta"><a class="brand" href="${brandUrl(p.brand)}">${esc(p.brand)}</a><span class="vol">${esc([p.origin, many ? `${p.family.length} phân loại` : p.vol].filter(Boolean).join(" · "))}</span></div>
   <h3><a href="${p.url}">${esc(p.name)}</a></h3>
@@ -376,7 +375,8 @@ for (const p of P) {
   const many = p.family.length > 1;
   const d = p.family.find(m => m.ownStock && !m.preorder) || p.family.find(m => m.orderable) || p; // phân loại chọn sẵn
   const preRate = Math.round((SITE.order.preorderDepositRate ?? 0.5) * 100);
-  const preNote = m => `Hàng order: shop nhập về sau khi bạn đặt, giao sau ${esc(m.leadTime || p.leadTime || "7–14 ngày")}.${preRate ? ` Đơn có hàng order cần cọc trước ${preRate}%.` : ""}`;
+  // Khách không thấy chữ "order": chỉ báo thời gian giao dự kiến và mức cọc khi chọn COD
+  const preNote = m => `Thời gian giao dự kiến: ${esc(m.leadTime || p.leadTime || "7–14 ngày")}.${preRate ? ` Thanh toán khi nhận hàng (COD) cần cọc trước ${preRate}%.` : ""}`;
   const title = many ? `${p.name} ${p.brand}` : `${p.name} ${p.brand} ${p.vol}`;
   const desc = `${p.name} ${p.brand} chính hãng, giá ${p.multiPrice ? "từ " : ""}${vnd(p.minPrice)}. ${oneLine(p.desc)}`.slice(0, 158);
   const priceHtml = m => `<span class="price${m.sale ? " on-sale" : ""}">${vnd(priceOf(m))}</span>${m.sale ? `<s>${vnd(m.price)}</s><span class="badge-off">−${pct(m)}%</span>` : ""}`;
@@ -392,13 +392,13 @@ for (const p of P) {
       <div class="prose lead-desc">${rich(p.desc)}</div>
       ${many ? `<div class="variants" data-variants="${p.id}" role="group" aria-label="Chọn phân loại">
         <p class="eyebrow">Phân loại</p>
-        <div class="vchips">${p.family.map(m => `<button type="button" class="vchip" data-vid="${m.id}" aria-pressed="${m.id === d.id}"${m.orderable ? "" : " disabled"}><b>${esc(m.vol || "Mặc định")}</b><small>${m.preorder ? `Order · ${vnd(priceOf(m))}` : m.ownStock ? vnd(priceOf(m)) : "Hết hàng"}</small></button>`).join("")}</div>
+        <div class="vchips">${p.family.map(m => `<button type="button" class="vchip" data-vid="${m.id}" aria-pressed="${m.id === d.id}"${m.orderable ? "" : " disabled"}><b>${esc(m.vol || "Mặc định")}</b><small>${m.orderable ? vnd(priceOf(m)) : "Hết hàng"}</small></button>`).join("")}</div>
       </div>` : ""}
       <p class="note pre" id="pdPre"${d.preorder ? "" : " hidden"}>${preNote(d)}</p>
       ${p.inStock ? `<div class="buy" data-buy="${p.id}">
         <div class="qty"><button type="button" data-step="-1" aria-label="Giảm số lượng">−</button><output id="pq">1</output><button type="button" data-step="1" aria-label="Tăng số lượng">+</button></div>
-        <button class="btn dark" type="button" data-add-qty="${d.id}">${d.preorder ? "Đặt trước" : "Thêm vào giỏ"}</button>
-        <button class="btn" type="button" data-buy-now="${d.id}">${d.preorder ? "Đặt trước & thanh toán" : "Mua ngay"}</button>
+        <button class="btn dark" type="button" data-add-qty="${d.id}">Thêm vào giỏ</button>
+        <button class="btn" type="button" data-buy-now="${d.id}">Mua ngay</button>
       </div>` : `<p class="note">Tạm hết hàng. Nhắn Zalo ${esc(SITE.zalo)} để được báo khi có hàng.</p>`}
       <p class="pay-note"><strong>Chuyển khoản trước: miễn phí giao hàng.</strong> COD: ship ${vnd(SITE.order.shipFee)} + phí thu hộ ${vnd(SITE.order.codFee)}.</p>
       <dl class="facts">

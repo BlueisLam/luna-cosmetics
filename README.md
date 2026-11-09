@@ -66,7 +66,8 @@ Link xem hành trình của từng hãng nằm trong `site.json` → `carriers` 
 ## Nhập sản phẩm từ web hãng / nhà cung cấp
 
 Admin → **Sản phẩm** → **Nhập từ web hãng**. Dán link trang danh mục (ví dụ `https://www.obagi.vn/collections/shop-all`) hoặc link một trang sản phẩm, bấm **Tải danh sách sản phẩm**.
-- Hỗ trợ web làm bằng **Shopify** (obagi.vn…), **WooCommerce**, và trang sản phẩm có dữ liệu chuẩn (JSON-LD). Web khác: dán link từng trang sản phẩm.
+- Hỗ trợ web làm bằng **Shopify** (obagi.vn…), **WooCommerce**, trang có dữ liệu chuẩn (JSON-LD), và **web hãng tự làm** (imageskincare.vn…): dán link trang danh sách, admin tự tìm link sản phẩm trên trang hoặc trong sitemap rồi đọc từng trang (tên, giá, giá gốc, dung tích, ảnh, Chi tiết / Cách dùng / Thành phần). Trang không ghi giá bán (hàng chuyên nghiệp cho spa…) được bỏ qua và báo số trang bỏ qua.
+- Web tự làm đọc từng trang nên chậm hơn (khoảng 1–2 phút cho 60–70 sản phẩm). Nếu đọc sai, dán link từng trang sản phẩm hoặc sửa tay trước khi nhập.
 - Tự lấy: tên, dung tích, giá (cả giá gốc nếu hãng đang giảm), ảnh, mô tả. Bật "Lấy thêm Cách dùng & Thành phần" để mở trang từng sản phẩm của hãng lấy hai mục này (từ tab / accordion hoặc khối "Hướng dẫn sử dụng"). Sản phẩm có nhiều biến thể (dung tích) được gom thành phân loại. Tự đoán danh mục, hoạt chất, nhu cầu, loại da. Bỏ phần "gợi ý routine", link bài viết của hãng.
 - Trước khi nhập: sửa tên, dung tích, danh mục từng món; chọn thương hiệu, xuất xứ, giá bán (giữ giá hãng hoặc giảm x%) cho cả lần nhập.
 - Ảnh được chép về kho ảnh của shop (Supabase Storage), không phụ thuộc web hãng.
@@ -86,7 +87,8 @@ Admin → Sản phẩm → **Sửa** → mục **Phân loại hàng** → **+ Th
 ## Hàng order (không có sẵn, khách đặt rồi mới nhập)
 
 Sửa sản phẩm → tick **Hàng order** và ghi **Thời gian giao hàng order** (ví dụ 7–14 ngày). Có thể đặt riêng cho từng phân loại (cột "Order").
-- Web: nhãn "Hàng order", nút **Đặt trước**, ghi chú thời gian giao. Không bao giờ hiện "Hết hàng".
+- Web: khách **không thấy chữ "order" hay "đặt trước"**. Sản phẩm trông như hàng bình thường (nút Thêm vào giỏ / Mua ngay), chỉ có dòng "Thời gian giao dự kiến: …" và nhắc cọc khi chọn COD. Không bao giờ hiện "Hết hàng". Tra cứu đơn hiện "Đang chuẩn bị hàng".
+- Admin vẫn thấy rõ: nhãn Order trên sản phẩm và món trong đơn, trạng thái đơn **Chờ hàng về**.
 - Thanh toán: đơn có hàng order mà chọn COD phải **cọc trước** (mặc định 50%, đổi ở Cài đặt → "Đơn có hàng order: cọc trước"). Chuyển khoản thì trả đủ như bình thường.
 - Kho: hàng order vẫn bán khi kho = 0; kho chuyển thành số âm = số khách đã đặt chờ nhập. Mục Kho → bộ lọc **Cần nhập** cho biết cần nhập bao nhiêu cái. Nhập hàng về thì số tự trừ dần.
 - Đơn hàng: món order có nhãn "Order". Khi đang đợi hàng, chuyển đơn sang **Chờ hàng về** để khách tra cứu thấy.
@@ -135,7 +137,7 @@ Trạng thái đơn: Chờ thanh toán (chuyển khoản, hoặc COD cần cọc
 | `admin/` | Trang quản lý |
 | `functions/api/` | Cloudflare Pages Functions: `rebuild` (nút Cập nhật web), `order-webhook` (báo Telegram), `fetch-url` (đọc web hãng, chỉ admin) |
 | `server/auth.js` | Kiểm tra quyền admin, dùng chung cho các function |
-| `admin/import-map.js` | Đọc dữ liệu Shopify / WooCommerce / JSON-LD và chuyển thành sản phẩm |
+| `admin/import-map.js` | Đọc dữ liệu Shopify / WooCommerce / JSON-LD / web tự làm (sitemap) và chuyển thành sản phẩm |
 | `public/_headers` | Header bảo mật và chống cache code cũ |
 | `data/products.json` | Sản phẩm dự phòng khi chưa nối Supabase |
 | `data/taxonomy.json` | Mô tả danh mục, nhu cầu da, hoạt chất, nội dung trang chính sách |

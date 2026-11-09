@@ -51,6 +51,8 @@
       return win;
     };
     const w = best(norm(title)) || best(norm(type)) || best(norm(tags.join(" | ")));
+    // "Moisturizer SPF 50", "Day cream SPF30" → kem chống nắng
+    if ((!w || w.sub === "Kem dưỡng") && /\bspf\s?\d{2}/.test(norm(title))) return { sub: "Chống nắng", cat: "skincare" };
     return w ? { sub: w.sub, cat: w.cat } : { sub: "Kem dưỡng", cat: "skincare" };
   }
 
@@ -142,21 +144,36 @@
   /* ---------- trang sản phẩm của hãng: lấy Cách dùng, Thành phần ---------- */
   // Các mục lớn thường gặp trên trang sản phẩm; gặp mục khác thì dừng
   const H_SECTION = /^(muc dich su dung|cong dung|thong tin an toan|cach bao quan|bao quan|luu y|doi tuong|ket qua|cam ket|chi tiet san pham|mo ta|thong tin san pham|goi y routine|tham khao|tim hieu them|xem them|cau hoi|danh gia|san pham lien quan|ban co the thich|khach hang|ve chung toi|ho tro|lien he|dang ky|chinh sach)/;
+  // Các tab / accordion trên trang: [{ title, el }]
+  function sectionsOf(d) {
+    const out = [], used = new Set();
+    const push = (t, el) => { const title = (t || "").replace(/\s+/g, " ").trim(); if (el && title && title.length < 60 && !used.has(el)) { used.add(el); out.push({ title, el }); } };
+    d.querySelectorAll("[aria-controls],[data-bs-target],[data-target],a[href^='#']").forEach(b => {
+      const id = (b.getAttribute("aria-controls") || b.getAttribute("data-bs-target") || b.getAttribute("data-target") || b.getAttribute("href") || "").replace(/^#/, "");
+      if (!id || id.length > 100 || /\s/.test(id)) return;
+      const p = d.getElementById(id);
+      if (p && p !== b && !p.contains(b)) push(b.textContent, p);
+    });
+    d.querySelectorAll("details > summary").forEach(sm => { const box = sm.parentElement.cloneNode(true); box.querySelector("summary").remove(); push(sm.textContent, box); });
+    return out;
+  }
+  const H_DESC = /^(chi tiet|mo ta|thong tin san pham|thong tin|cong dung|gioi thieu|dac diem|description|details|overview|product details|muc dich su dung)/;
   function extractPage(html) {
-    const res = { howto: "", ingredients: "" };
+    const res = { howto: "", ingredients: "", desc: "" };
     if (!html) return res;
     const d = new DOMParser().parseFromString(String(html), "text/html");
-    d.querySelectorAll("script,style,noscript,svg,header,footer,nav,[class*=footer],[class*=header],[class*=cart-drawer],[class*=newsletter],[id*=footer],[id*=header]").forEach(e => e.remove());
+    d.querySelectorAll("script,style,noscript,svg,header,footer,nav,[class*=footer],[class*=header]:not([class*=accordion]):not([class*=tab]):not([class*=card-header]):not([class*=collapse]):not([class*=panel]),[class*=cart-drawer],[class*=newsletter],[id*=footer],[id*=header]").forEach(e => e.remove());
     // 1) tab / accordion: tiêu đề + khung nội dung
-    const take = (title, el) => {
+    const descParts = [];
+    sectionsOf(d).forEach(({ title, el }) => {
       const n = norm(title.replace(/[:\s]+$/, ""));
       const lines = textLines(el.innerHTML);
       if (!lines.length) return;
       if (!res.howto && H_HOWTO.test(n)) res.howto = capLines(lines, 1500);
       else if (!res.ingredients && H_INGR.test(n)) res.ingredients = capLines(lines, 2500);
-    };
-    d.querySelectorAll("[aria-controls]").forEach(b => { const p = d.getElementById(b.getAttribute("aria-controls")); if (p) take(b.textContent, p); });
-    d.querySelectorAll("details > summary").forEach(sm => { const box = sm.parentElement.cloneNode(true); box.querySelector("summary").remove(); take(sm.textContent, box); });
+      else if (H_DESC.test(n) && descParts.length < 3) descParts.push(...lines);
+    });
+    res.desc = capLines(descParts, 2500);
     // 2) quét chữ trên trang: dòng tiêu đề "Hướng dẫn sử dụng" / "Thành phần" và các dòng sau nó
     if (!res.howto || !res.ingredients) {
       const main = d.querySelector("main") || d.body;
@@ -216,7 +233,7 @@
       type: (p.categories || []).map(c => c.name).join(", "), tags: tagList(p.tags),
     }];
   }
-  function fromHtml(html, pageUrl) {
+  function fromHtml(html, pageUrl, ldOnly) {
     const d = new DOMParser().parseFromString(html, "text/html");
     const nodes = [];
     d.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
@@ -234,7 +251,7 @@
         available: !/OutOfStock/i.test(offers.availability || ""), type: n.category || "", tags: [],
       };
     });
-    if (items.length) return items;
+    if (items.length || ldOnly) return items;
     const meta = p => (d.querySelector(`meta[property="${p}"],meta[name="${p}"]`) || {}).content || "";
     const title = meta("og:title") || (d.querySelector("h1") || {}).textContent || "";
     if (!title.trim()) return [];
@@ -244,6 +261,84 @@
       images: uniq([absUrl(meta("og:image"), pageUrl)]), html: meta("og:description") || meta("description"),
       sku: "", available: true, type: "", tags: [],
     }];
+  }
+
+  /* ---------- web tự làm: đoán tên, giá, ảnh từ HTML ---------- */
+  const MONEY = /(\d{1,3}(?:[.,]\d{3})+|\d{4,})\s?(?:đ|₫|vnđ|vnd|đồng)/i;
+  const moneyOf = t => { const m = MONEY.exec(t || ""); return m ? Number(m[1].replace(/[.,]/g, "")) : 0; };
+  const JUNK = "[class*=related],[class*=top-product],[class*=suggest],[class*=recommend],[class*=upsell],[class*=cross-sell],[class*=recent],[class*=footer],[class*=header],[class*=menu],[class*=navbar],[class*=logo],[class*=banner],[class*=blog],[class*=popup],[class*=cart],footer,header,nav";
+  const imgSrc = i => { const ss = (i.getAttribute("srcset") || i.getAttribute("data-srcset") || "").split(",").map(x => x.trim().split(" ")[0]).filter(Boolean); return i.getAttribute("data-src") || i.getAttribute("data-lazy-src") || i.getAttribute("data-original") || i.getAttribute("data-zoom-image") || ss[ss.length - 1] || i.getAttribute("src") || ""; };
+  function fromGenericPage(html, pageUrl) {
+    const d = new DOMParser().parseFromString(String(html || ""), "text/html");
+    const meta = p => ((d.querySelector(`meta[property="${p}"],meta[name="${p}"]`) || {}).content || "").trim();
+    d.querySelectorAll("script,style,noscript,svg").forEach(e => e.remove());
+    const pick = sel => [...d.querySelectorAll(sel)].find(e => !e.closest(JUNK) && e.textContent.trim().length > 2 && e.textContent.trim().length < 200);
+    const nameEl = pick("[itemprop=name]") || pick("h1") || pick("[class*=detail][class*=name],[class*=detail][class*=title]") || pick("[class*=product][class*=name],[class*=product][class*=title]");
+    const siteName = meta("og:site_name");
+    const name = ((nameEl && nameEl.textContent) || meta("og:title") || "").replace(/\s+/g, " ").trim().replace(siteName ? new RegExp(`\\s*[|\\-–]\\s*${siteName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) : /$^/, "");
+    if (!name) return [];
+    // vùng sản phẩm: đi lên từ tên tới khi gặp giá
+    let scope = nameEl || d.body;
+    for (let i = 0; nameEl && i < 8 && scope.parentElement && !MONEY.test(scope.textContent); i++) scope = scope.parentElement;
+    if (!MONEY.test(scope.textContent)) scope = d.body;
+    const leaves = [...scope.querySelectorAll("*")].filter(e => !e.closest(JUNK) && [...e.childNodes].some(n => n.nodeType === 3 && MONEY.test(n.textContent)));
+    const isOld = e => !!e.closest("del,s,strike,[class*=old],[class*=compare],[class*=regular],[class*=original],[class*=line-through],[class*=before],[class*=list-price]");
+    const cur = leaves.filter(e => !isOld(e)), old = leaves.filter(isOld);
+    const nowP = moneyOf((cur.find(e => /price|gia/i.test(e.className + " " + (e.parentElement || {}).className)) || cur[0] || {}).textContent) || Math.round(Number(meta("product:price:amount")) || 0);
+    const oldP = moneyOf((old[0] || {}).textContent);
+    // ảnh: og:image + ảnh trong khu bộ sưu tập
+    const imgs = [];
+    const og = meta("og:image"); if (og) imgs.push(absUrl(og, pageUrl));
+    d.querySelectorAll("img").forEach(i => {
+      if (i.closest(JUNK)) return;
+      const box = i.closest("[class*=gallery],[class*=thumb],[class*=product-image],[class*=product-img],[class*=product-photo],[class*=slider],[class*=swiper],[class*=carousel],[class*=zoom],[class*=product-media],[class*=detail-img]");
+      if (!box && !scope.contains(i)) return;
+      const u = absUrl(imgSrc(i), pageUrl);
+      if (u && !/\.svg(\?|$)|logo|icon|sprite|placeholder|loading/i.test(u)) imgs.push(u);
+    });
+    // dung tích: nút / nhãn ngắn trong vùng sản phẩm
+    const sizeEl = [...scope.querySelectorAll("button,label,option,span,a,li")].find(e => !e.closest(JUNK) && e.textContent.trim().length <= 14 && findSize(e.textContent.trim()) && findSize(e.textContent.trim()).length >= e.textContent.trim().replace(/\s/g, "").length - 2);
+    const x = extractPage(html);
+    const out = (x.desc || meta("og:description") || meta("description")).split("\n").map(l => `<p>${l.replace(/[<>&]/g, "")}</p>`).join("");
+    return [{
+      key: `page-${pageUrl}`, sourceUrl: pageUrl, name, vendor: meta("product:brand") || cleanBrand(siteName),
+      vol: (sizeEl && findSize(sizeEl.textContent.trim())) || findSize(name) || labeledSize(scope.innerHTML),
+      price: oldP > nowP ? oldP : nowP, salePrice: oldP > nowP ? nowP : 0,
+      images: uniq(imgs).slice(0, 6), html: out, extra: { howto: x.howto, ingredients: x.ingredients },
+      sku: "", available: !/hết hàng|het hang|out of stock|tạm hết|ngừng kinh doanh/i.test(scope.textContent.slice(0, 3000)), type: "", tags: [],
+    }];
+  }
+  // Trang sản phẩm: JSON-LD trước, không có thì đoán từ HTML (cần có giá)
+  function fromPage(html, pageUrl) {
+    const ld = fromHtml(html, pageUrl, true);
+    if (ld.length) return ld;
+    const g = fromGenericPage(html, pageUrl);
+    return g.filter(x => x.price > 0);
+  }
+  // Link sản phẩm trên trang danh sách: link nằm trong "thẻ" có ảnh và giá
+  const SKIP_PATH = /^\/(cart|gio-hang|account|tai-khoan|login|dang-nhap|register|blog|tin-tuc|news|tag|tags|search|tim-kiem|page|pages|lien-he|contact|chinh-sach|policy|collections|danh-muc|category|categories)(\/|$)/i;
+  function productLinks(html, pageUrl) {
+    const d = new DOMParser().parseFromString(String(html || ""), "text/html");
+    const here = new URL(pageUrl), out = new Set();
+    d.querySelectorAll("a[href]").forEach(a => {
+      let u; try { u = new URL(a.getAttribute("href"), pageUrl); } catch (e) { return; }
+      if (u.origin !== here.origin || u.pathname === here.pathname || SKIP_PATH.test(u.pathname) || u.pathname.split("/").filter(Boolean).length < 1) return;
+      if (a.closest("header,footer,nav,[class*=menu],[class*=navbar],[class*=related],[class*=suggest],[class*=recommend],[class*=upsell],[class*=cross-sell],[class*=recent],[class*=top-product]")) return;
+      let box = a, ok = false;
+      for (let i = 0; i < 5 && box; i++, box = box.parentElement) if (box.querySelector && box.querySelector("img") && MONEY.test(box.textContent) && box.textContent.length < 1500) { ok = true; break; }
+      if (ok) out.add(u.origin + u.pathname);
+    });
+    return [...out];
+  }
+  const sitemapLocs = xml => [...String(xml || "").matchAll(/<loc>\s*(?:<!\[CDATA\[)?\s*([^<\s\]]+)/gi)].map(m => m[1].replace(/&amp;/g, "&"));
+  // Lọc link sản phẩm trong sitemap theo đường dẫn trang danh sách (vd /product → /product/xxx)
+  function filterSitemap(urls, pageUrl) {
+    const here = new URL(pageUrl);
+    const prefix = here.pathname.replace(/\/+$/, "");
+    const same = urls.filter(u => { try { return new URL(u).host === here.host; } catch (e) { return false; } });
+    const under = prefix ? same.filter(u => new URL(u).pathname.startsWith(prefix + "/")) : [];
+    if (under.length) return uniq(under);
+    return uniq(same.filter(u => /\/(products?|san-pham|sp|p|item|shop)\/[^/]+\/?$/i.test(new URL(u).pathname)));
   }
 
   /* ---------- kế hoạch tải theo link ---------- */
@@ -277,7 +372,7 @@
   }
   function toProduct(item, opts) {
     const c = cleanHtml(item.html);
-    if (item.extra) { c.howto = c.howto || item.extra.howto || ""; c.ingredients = item.extra.ingredients || c.ingredients; }
+    if (item.extra) { c.howto = c.howto || item.extra.howto || ""; c.ingredients = item.extra.ingredients || c.ingredients; if (!c.desc && item.extra.desc) c.desc = item.extra.desc; }
     const head = norm([item.name, item.type, item.tags.join(" | ")].join(" | "));
     const body = norm(c.desc + "\n" + c.howto + "\n" + c.ingredients);
     const { sub, cat } = pickSub(item.name, item.type, item.tags);
@@ -298,6 +393,6 @@
     };
   }
 
-  g.LunaImport = { plan, fromShopify, fromWoo, fromHtml, toProduct, calcPrice, cleanHtml, extractPage, pickSub, findSize, cleanBrand, hostBrand, norm,
+  g.LunaImport = { plan, fromShopify, fromWoo, fromHtml, fromPage, fromGenericPage, productLinks, sitemapLocs, filterSitemap, toProduct, calcPrice, cleanHtml, extractPage, pickSub, findSize, cleanBrand, hostBrand, norm,
     SUBS: SUB_RULES.map(r => r[0]), MAKEUP: SUB_RULES.filter(r => r[1] === "makeup").map(r => r[0]), SHAPE, TINT };
 })(typeof window !== "undefined" ? window : globalThis);

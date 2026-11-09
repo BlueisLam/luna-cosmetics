@@ -354,6 +354,39 @@
   async function getJson(url) { const t = await (await proxy(url)).text(); try { return JSON.parse(t); } catch (e) { return null; } }
   const iStatus = m => { const el = $("iErr"); if (el) { el.textContent = m; el.classList.toggle("muted", !!m && !/^Không|lỗi|Lỗi/.test(m)); } };
 
+  // Web tự làm (không phải Shopify/Woo): tìm link sản phẩm trong sitemap
+  async function sitemapProducts(pageUrl) {
+    const o = new URL(pageUrl).origin, seen = new Set(), urls = [];
+    let maps = [];
+    try { const t = await (await proxy(`${o}/robots.txt`)).text(); maps = [...t.matchAll(/^\s*sitemap:\s*(\S+)/gim)].map(m => m[1]); } catch (e) {}
+    if (!maps.length) maps = [`${o}/sitemap.xml`];
+    iStatus("Đang tìm sản phẩm trong sitemap…");
+    for (let i = 0; i < maps.length && seen.size < 12; i++) {
+      const m = maps[i]; if (seen.has(m)) continue; seen.add(m);
+      let xml = ""; try { xml = await (await proxy(m)).text(); } catch (e) { continue; }
+      const locs = LI.sitemapLocs(xml);
+      if (/<sitemapindex/i.test(xml)) {
+        // ưu tiên sitemap có chữ product / san-pham
+        locs.sort((a, b) => (/product|san-pham|sanpham/i.test(b) ? 1 : 0) - (/product|san-pham|sanpham/i.test(a) ? 1 : 0)).forEach(x => maps.push(x));
+      } else urls.push(...locs);
+    }
+    return LI.filterSitemap(urls, pageUrl);
+  }
+  // Đọc từng trang sản phẩm (3 trang cùng lúc)
+  async function readPages(links) {
+    const out = []; let i = 0, done = 0; readPages.skipped = 0;
+    const work = async () => {
+      while (i < links.length) {
+        const u = links[i++];
+        try { const r = await proxy(u); const got = LI.fromPage(await r.text(), r.headers.get("X-Final-Url") || u); if (!got.length) readPages.skipped++; out.push(...got); } catch (e) { if (e.status === 401) throw e; readPages.skipped++; }
+        iStatus(`Đang đọc ${++done}/${links.length} sản phẩm…`);
+      }
+    };
+    await Promise.all([work(), work(), work()]);
+    const order = new Map(links.map((u, k) => [u, k]));
+    return out.sort((a, b) => (order.get(a.sourceUrl) ?? 0) - (order.get(b.sourceUrl) ?? 0));
+  }
+
   async function loadSource(input) {
     const origin = new URL(input).origin;
     let lastErr = null;
@@ -382,7 +415,15 @@
           if (all.length) return { platform: "WooCommerce", items: all.flatMap(LI.fromWoo) };
         } else {
           const r = await proxy(s.url);
-          const items = LI.fromHtml(await r.text(), r.headers.get("X-Final-Url") || s.url);
+          const final = r.headers.get("X-Final-Url") || s.url, html = await r.text();
+          const items = LI.fromPage(html, final);
+          let links = LI.productLinks(html, final);
+          if (items.length && links.length < 4) return { platform: "Trang sản phẩm", items };
+          if (links.length < 2) links = await sitemapProducts(final);
+          if (links.length) {
+            const got = await readPages(links.slice(0, 300));
+            if (got.length) return { platform: `Web riêng của hãng${readPages.skipped ? ` · bỏ qua ${readPages.skipped} trang không có giá bán` : ""}`, items: got };
+          }
           if (items.length) return { platform: "Trang sản phẩm", items };
         }
       } catch (e) {
@@ -542,8 +583,8 @@
     for (const [n, r] of chosen.entries()) {
       $("iProg").textContent = `Đang nhập ${n + 1}/${chosen.length}: ${r.name}`;
       try {
-        let extra = null;
-        if (o.detail && r.item.sourceUrl) {
+        let extra = o.detail && r.item.extra ? r.item.extra : null;
+        if (o.detail && !extra && r.item.sourceUrl) {
           $("iProg").textContent = `Đang nhập ${n + 1}/${chosen.length}: ${r.name} (đọc trang sản phẩm…)`;
           try { extra = LI.extractPage(await (await proxy(r.item.sourceUrl)).text()); } catch (e) { console.warn("Không đọc được trang sản phẩm", e); }
         }

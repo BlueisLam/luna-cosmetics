@@ -88,10 +88,10 @@
     selVid = String(m.id);
     if (vbox) vbox.querySelectorAll(".vchip").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.vid === selVid)));
     const pr = $("pdPrice") || document.querySelector(".pdp .prices"); if (pr) pr.innerHTML = priceHtml(m);
-    document.querySelectorAll("[data-add-qty]").forEach(b => { b.dataset.addQty = m.id; b.textContent = m.preorder ? "Đặt trước" : "Thêm vào giỏ"; });
-    document.querySelectorAll("[data-buy-now]").forEach(b => { b.dataset.buyNow = m.id; b.textContent = m.preorder ? "Đặt trước & thanh toán" : "Mua ngay"; });
+    document.querySelectorAll("[data-add-qty]").forEach(b => { b.dataset.addQty = m.id; });
+    document.querySelectorAll("[data-buy-now]").forEach(b => { b.dataset.buyNow = m.id; });
     const pre = $("pdPre");
-    if (pre) { pre.hidden = !m.preorder; if (m.preorder) pre.textContent = `Hàng order: shop nhập về sau khi bạn đặt, giao sau ${m.lead || "7–14 ngày"}.${preRate() ? ` Đơn có hàng order cần cọc trước ${preRate()}%.` : ""}`; }
+    if (pre) { pre.hidden = !m.preorder; if (m.preorder) pre.textContent = `Thời gian giao dự kiến: ${m.lead || "7–14 ngày"}.${preRate() ? ` Thanh toán khi nhận hàng (COD) cần cọc trước ${preRate()}%.` : ""}`; }
   }
 
   /* ---------- cửa hàng: bộ lọc ---------- */
@@ -259,7 +259,7 @@
               <small>${codBlocked ? blockMsg : `Ship ${vnd(CFG.shipFee)} + phí thu hộ ${vnd(CFG.codFee)}. Shop gọi hoặc nhắn Zalo xác nhận trước khi gửi hàng.`}</small>
               ${codBlocked ? "" : `<small><strong>Tổng: ${vnd(qc.total)}</strong>${qc.deposit ? ` · cọc trước ${vnd(qc.deposit)}, còn lại trả khi nhận` : ""}</small>`}</span></label>
           </div>
-          ${hasPre() ? `<div class="note">Đơn có <strong>hàng order</strong>: shop nhập hàng về sau khi bạn đặt và thanh toán${preRate() ? ` / cọc ${preRate()}%` : ""}, giao sau ${esc([...new Set(Object.keys(cart).map(byId).filter(p => p && p.preorder).map(p => p.lead || "7–14 ngày"))].join(", "))}.</div>` : ""}
+          ${hasPre() ? `<div class="note">Thời gian giao dự kiến: ${esc([...new Set(Object.keys(cart).map(byId).filter(p => p && p.preorder).map(p => p.lead || "7–14 ngày"))].join(", "))}.${preRate() ? ` Thanh toán khi nhận hàng (COD) cần cọc trước ${preRate()}%.` : ""}</div>` : ""}
           ${form.method === "cod" && !codBlocked ? `<div class="note">Chọn chuyển khoản để tiết kiệm <strong>${vnd(qc.total - qb.total)}</strong>${qc.deposit ? " và không cần cọc" : ""}.</div>` : ""}
         </fieldset>
         <p class="err" id="fErr" role="alert"></p>
@@ -267,7 +267,7 @@
       </form>
       <aside class="panel summary" aria-label="Tóm tắt đơn hàng">
         <p class="eyebrow" style="margin:0">Đơn hàng (${count()} sản phẩm)</p>
-        ${items.map(([id, n]) => { const p = byId(id); return `<div class="line"><div class="thumb" style="background:${p.tint}">${thumb(p)}</div><div><h4>${esc(p.name)}${vlabel(p)}</h4><small>${esc(p.brand)} · x${n}${p.preorder ? ` · <b>Hàng order</b>` : ""}</small></div><span class="price">${vnd(priceOf(p) * n)}</span></div>`; }).join("")}
+        ${items.map(([id, n]) => { const p = byId(id); return `<div class="line"><div class="thumb" style="background:${p.tint}">${thumb(p)}</div><div><h4>${esc(p.name)}${vlabel(p)}</h4><small>${esc(p.brand)} · x${n}${p.preorder ? ` · giao dự kiến ${esc(p.lead || "7–14 ngày")}` : ""}</small></div><span class="price">${vnd(priceOf(p) * n)}</span></div>`; }).join("")}
         <div class="row"><span>Tạm tính</span><span>${vnd(st)}</span></div>
         <div class="row"><span>Phí giao hàng</span><span>${q.ship ? vnd(q.ship) : "Miễn phí"}</span></div>
         ${q.fee ? `<div class="row"><span>Phí thu hộ</span><span>${vnd(q.fee)}</span></div>` : ""}
@@ -390,7 +390,7 @@
       const swap = html => { const t = document.createElement("template"); t.innerHTML = html.trim(); el.replaceWith(t.content.firstChild); };
       if (!any) swap(`<button class="add" disabled>Hết hàng</button>`);
       else if (many && el.tagName !== "A") swap(`<a class="add" href="${p.url}">Chọn phân loại</a>`);
-      else if (!many && (el.disabled || el.tagName === "A" || el.textContent !== (p.preorder ? "Đặt trước" : "Thêm vào giỏ"))) swap(`<button class="add" data-add="${p.id}">${p.preorder ? "Đặt trước" : "Thêm vào giỏ"}</button>`);
+      else if (!many && (el.disabled || el.tagName === "A" || el.textContent !== "Thêm vào giỏ")) swap(`<button class="add" data-add="${p.id}">Thêm vào giỏ</button>`);
       const pr = c.querySelector(".prices");
       if (pr) pr.innerHTML = many && new Set(fam.map(priceOf)).size > 1 ? `<span class="price">Từ ${vnd(minPrice(p))}</span>` : `<span class="price${p.sale ? " on-sale" : ""}">${vnd(priceOf(p))}</span>${p.sale ? `<s>${vnd(p.price)}</s>` : ""}`;
     });
@@ -398,7 +398,7 @@
       const main = byId((buy && buy.dataset.buy) || (vbox && vbox.dataset.variants));
       if (!main) return;
       const fam = family(main);
-      if (vbox) vbox.querySelectorAll(".vchip").forEach(b => { const m = byId(b.dataset.vid); if (!m) return; b.disabled = !(m.inStock || m.preorder); b.querySelector("small").textContent = m.preorder ? `Order · ${vnd(priceOf(m))}` : m.inStock ? vnd(priceOf(m)) : "Hết hàng"; });
+      if (vbox) vbox.querySelectorAll(".vchip").forEach(b => { const m = byId(b.dataset.vid); if (!m) return; b.disabled = !(m.inStock || m.preorder); b.querySelector("small").textContent = m.inStock || m.preorder ? vnd(priceOf(m)) : "Hết hàng"; });
       const sel = byId(selVid);
       const ok = m => m && (m.inStock || m.preorder);
       const next = ok(sel) ? sel : fam.find(m => m.inStock && !m.preorder) || fam.find(ok);
@@ -412,12 +412,12 @@
   const myOrders = () => store.get("luna-my-orders", []);
   const remember = (code, phone) => store.set("luna-my-orders", [{ code, phone }, ...myOrders().filter(o => o.code !== code)].slice(0, 10));
   const T_STATUS = {
-    cho_thanh_toan: ["Chờ thanh toán", "wait"], cho_xac_nhan: ["Chờ xác nhận", "wait"], da_xac_nhan: ["Đang đóng gói", "go"], cho_hang: ["Chờ hàng về", "wait"],
+    cho_thanh_toan: ["Chờ thanh toán", "wait"], cho_xac_nhan: ["Chờ xác nhận", "wait"], da_xac_nhan: ["Đang đóng gói", "go"], cho_hang: ["Đang chuẩn bị hàng", "go"],
     dang_giao: ["Đang giao", "go"], hoan_thanh: ["Đã giao", "done"], da_huy: ["Đã huỷ", "off"],
   };
   const T_EVENT = {
     cho_thanh_toan: "Đặt hàng thành công, chờ thanh toán", cho_xac_nhan: "Đặt hàng thành công, chờ shop xác nhận",
-    da_thanh_toan: "Luna đã nhận thanh toán", da_xac_nhan: "Đơn đã xác nhận, đang đóng gói", cho_hang: "Shop đang nhập hàng về cho bạn",
+    da_thanh_toan: "Luna đã nhận thanh toán", da_xac_nhan: "Đơn đã xác nhận, đang đóng gói", cho_hang: "Đơn đang được chuẩn bị",
     dang_giao: "Đã giao cho đơn vị vận chuyển", hoan_thanh: "Giao hàng thành công", da_huy: "Đơn đã huỷ",
   };
   const fmtT = t => new Date(t).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit", year: "numeric" });
@@ -451,12 +451,12 @@
     const step2 = o.method === "bank" ? "Thanh toán" : o.deposit > 0 ? "Đặt cọc" : "Xác nhận";
     const at = { cho_thanh_toan: 1, cho_xac_nhan: 1, da_xac_nhan: 2, cho_hang: 2, dang_giao: 3, hoan_thanh: 5 }[o.status] ?? 1;
     const pre = (o.items || []).some(i => i.preorder);
-    const steps = ["Đặt hàng", step2, pre ? "Nhập hàng & đóng gói" : "Đóng gói", "Đang giao", "Đã giao"];
+    const steps = ["Đặt hàng", step2, pre ? "Chuẩn bị hàng" : "Đóng gói", "Đang giao", "Đã giao"];
     const msg = {
       cho_thanh_toan: o.method === "bank" ? "Đơn sẽ được đóng gói ngay khi Luna nhận được chuyển khoản." : `Vui lòng chuyển khoản tiền cọc ${vnd(o.deposit)} để Luna xác nhận đơn.`,
       cho_xac_nhan: "Luna sẽ gọi hoặc nhắn Zalo cho bạn để xác nhận trước khi gửi hàng.",
-      da_xac_nhan: pre ? "Đơn đã được xác nhận. Shop đang nhập hàng order về cho bạn." : "Đơn đã được xác nhận và đang đóng gói, thường gửi đi trong ngày.",
-      cho_hang: `Hàng order đang được nhập về${(o.items.find(i => i.lead) || {}).lead ? ` (khoảng ${(o.items.find(i => i.lead) || {}).lead})` : ""}. Luna sẽ gửi ngay khi hàng về.`,
+      da_xac_nhan: pre ? `Đơn đã được xác nhận và đang được chuẩn bị. Thời gian giao dự kiến: ${(o.items.find(i => i.lead) || {}).lead || "7–14 ngày"}.` : "Đơn đã được xác nhận và đang đóng gói, thường gửi đi trong ngày.",
+      cho_hang: `Luna đang chuẩn bị đơn của bạn${(o.items.find(i => i.lead) || {}).lead ? `, thời gian giao dự kiến ${(o.items.find(i => i.lead) || {}).lead}` : ""}. Luna sẽ báo ngay khi gửi hàng.`,
       dang_giao: "Đơn đang trên đường đến bạn, thường mất 1–3 ngày.",
       hoan_thanh: "Đơn đã giao thành công. Cảm ơn bạn đã mua sắm tại Luna!",
       da_huy: `Đơn này đã huỷ. Nếu có nhầm lẫn, vui lòng nhắn Zalo ${CFG.zalo}.`,
@@ -484,7 +484,7 @@
   <div class="t-cols">
     <div><h3>Lịch sử đơn hàng</h3><ol class="timeline">${(o.events || []).map(e => `<li>${esc(T_EVENT[e.status] || e.status)}<time datetime="${esc(e.at)}">${fmtT(e.at)}</time></li>`).join("")}</ol></div>
     <div><h3>Sản phẩm</h3>
-      <ul class="t-items">${(o.items || []).map(i => `<li><span>${i.qty} × ${esc(i.name)}${i.vol ? ` (${esc(i.vol)})` : ""}${i.preorder ? ` · <b>hàng order</b>` : ""}</span><span>${vnd(i.price * i.qty)}</span></li>`).join("")}</ul>
+      <ul class="t-items">${(o.items || []).map(i => `<li><span>${i.qty} × ${esc(i.name)}${i.vol ? ` (${esc(i.vol)})` : ""}</span><span>${vnd(i.price * i.qty)}</span></li>`).join("")}</ul>
       <div class="df" style="padding:12px 0 0;background:none">
         ${o.ship ? `<div class="row"><span>Phí giao hàng</span><span>${vnd(o.ship)}</span></div>` : `<div class="row"><span>Phí giao hàng</span><span>Miễn phí</span></div>`}
         ${o.fee ? `<div class="row"><span>Phí thu hộ</span><span>${vnd(o.fee)}</span></div>` : ""}
