@@ -23,6 +23,19 @@ const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").re
 const slug = s => String(s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/&/g, " va ").replace(/%/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const vnd = n => n.toLocaleString("vi-VN").replace(/,/g, ".") + "đ";
 const priceOf = p => p.sale || p.price;
+// văn bản nhiều dòng → đoạn văn; dòng bắt đầu bằng "•" hoặc "-" → danh sách
+function rich(text) {
+  const lines = String(text || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
+  let html = "", list = [];
+  const flush = () => { if (list.length) { html += `<ul>${list.map(l => `<li>${esc(l)}</li>`).join("")}</ul>`; list = []; } };
+  for (const l of lines) {
+    if (/^[•\-–*]\s*/.test(l)) list.push(l.replace(/^[•\-–*]\s*/, ""));
+    else { flush(); html += `<p>${esc(l)}</p>`; }
+  }
+  flush();
+  return html;
+}
+const oneLine = s => String(s || "").replace(/\s*\n+\s*/g, " ").replace(/^[•\-–*]\s*/, "").trim();
 const pct = p => (p.sale ? Math.round((1 - p.sale / p.price) * 100) : 0);
 const uniq = a => [...new Set(a)];
 const CAT_NAME = { skincare: "Skincare", makeup: "Makeup" };
@@ -345,7 +358,7 @@ for (const p of P) {
     .sort((a, b) => b.s - a.s).slice(0, 4).map(r => r.x);
   const links = (arr, fn) => arr.map(v => `<a href="${fn(v)}">${esc(v)}</a>`).join(", ");
   const title = `${p.name} ${p.brand} ${p.vol}`;
-  const desc = `${p.name} ${p.brand} chính hãng, giá ${vnd(priceOf(p))}. ${p.desc}`.slice(0, 158);
+  const desc = `${p.name} ${p.brand} chính hãng, giá ${vnd(priceOf(p))}. ${oneLine(p.desc)}`.slice(0, 158);
   const body = `<div class="wrap">
   ${bc.html}
   <div class="pdp">
@@ -355,7 +368,7 @@ for (const p of P) {
       <a class="brand" href="${brandUrl(p.brand)}">${esc(p.brand)}</a>
       <h1 class="display">${esc(p.name)}</h1>
       <div class="prices"><span class="price${p.sale ? " on-sale" : ""}">${vnd(priceOf(p))}</span>${p.sale ? `<s>${vnd(p.price)}</s><span class="badge-off">−${pct(p)}%</span>` : ""}</div>
-      <p>${esc(p.desc)}</p>
+      <div class="prose lead-desc">${rich(p.desc)}</div>
       ${p.inStock ? `<div class="buy" data-buy="${p.id}">
         <div class="qty"><button type="button" data-step="-1" aria-label="Giảm số lượng">−</button><output id="pq">1</output><button type="button" data-step="1" aria-label="Tăng số lượng">+</button></div>
         <button class="btn dark" type="button" data-add-qty="${p.id}">Thêm vào giỏ</button>
@@ -372,15 +385,15 @@ for (const p of P) {
         ${p.concerns.length ? `<dt>Phù hợp</dt><dd>${links(p.concerns, needUrl)}</dd>` : ""}
       </dl>
       <div class="prose">
-        <h2>Cách dùng</h2><p>${esc(p.howto)}</p>
-        ${p.ingredients ? `<h2>Thành phần</h2><p>${esc(p.ingredients)}</p>` : ""}
+        ${p.howto ? `<h2>Cách dùng</h2>${rich(p.howto)}` : ""}
+        ${p.ingredients ? `<h2>Thành phần</h2>${rich(p.ingredients)}` : ""}
       </div>
     </div>
   </div>
   <section class="section"><div class="sec-head"><h2>Có thể bạn cũng thích</h2></div>${grid(related, "row4")}</section>
 </div>`;
   const product = {
-    "@context": "https://schema.org", "@type": "Product", name: `${p.name} ${p.brand}`, description: p.desc, sku: `LUNA-${p.id}`,
+    "@context": "https://schema.org", "@type": "Product", name: `${p.name} ${p.brand}`, description: oneLine(p.desc), sku: `LUNA-${p.id}`,
     brand: { "@type": "Brand", name: p.brand }, category: `${CAT_NAME[p.cat]} > ${p.sub}`, countryOfOrigin: p.origin,
     ...(p.images.length ? { image: p.images.map(i => (i.startsWith("http") ? i : BASE + i)) } : {}),
     offers: { "@type": "Offer", url: BASE + p.url, priceCurrency: "VND", price: priceOf(p), itemCondition: "https://schema.org/NewCondition",
@@ -462,10 +475,9 @@ fs.writeFileSync(path.join(OUT, "robots.txt"), `User-agent: *\nAllow: /\nDisallo
 /* Trang admin */
 fs.mkdirSync(path.join(OUT, "admin"), { recursive: true });
 fs.writeFileSync(path.join(OUT, "admin/index.html"), fs.readFileSync(path.join(ROOT, "admin/index.html"), "utf8")
-  .replace(/\/(assets\/style\.css|admin\/admin\.css|admin\/admin\.js)"/g, `/$1?v=${ASSET_V}"`)
+  .replace(/\/(assets\/style\.css|admin\/admin\.css|admin\/admin\.js|admin\/import-map\.js)"/g, `/$1?v=${ASSET_V}"`)
   .replace("__ADMIN_CONFIG__", JSON.stringify({ supabase: SB.url && SB.anonKey ? SB : null, site: SITE.url, shopName: SITE.name, carriers: SITE.carriers || [], taxonomy: { needs: T.needs.map(n => n.name), subs: Object.keys(T.subs) } }).replace(/</g, "\\u003c")));
-fs.copyFileSync(path.join(ROOT, "admin/admin.js"), path.join(OUT, "admin/admin.js"));
-fs.copyFileSync(path.join(ROOT, "admin/admin.css"), path.join(OUT, "admin/admin.css"));
+for (const f of ["admin.js", "admin.css", "import-map.js"]) fs.copyFileSync(path.join(ROOT, "admin", f), path.join(OUT, "admin", f));
 
 console.log(`• Nguồn sản phẩm: ${fromDB ? "Supabase" : "data/products.json"}`);
 console.log(`✓ Đã tạo ${pages.length} trang (+ thanh toán, 404) vào dist/ — ${P.length} sản phẩm, ${BRANDS.length} thương hiệu, ${ACTIVES.length} hoạt chất`);

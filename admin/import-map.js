@@ -1,0 +1,255 @@
+/* Luna Admin — đọc sản phẩm từ web hãng / nhà cung cấp và chuyển sang dạng sản phẩm của Luna.
+   Hỗ trợ: Shopify (vd obagi.vn), WooCommerce (Store API), trang có dữ liệu chuẩn JSON-LD / Open Graph.
+   File này không gọi mạng: admin.js tải dữ liệu rồi đưa vào đây. */
+(function (g) {
+  const norm = s => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d");
+  const uniq = a => [...new Set(a.filter(Boolean))];
+  const round1000 = n => Math.round(n / 1000) * 1000;
+  const absUrl = (u, base) => { try { return u ? new URL(u, base || "https://x.invalid").toString() : ""; } catch (e) { return ""; } };
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // tìm từ khoá (đã bỏ dấu) có ranh giới từ; trả về vị trí đầu tiên hoặc -1
+  const findKw = (text, kw) => { const m = new RegExp(`(?:^|[^a-z0-9])${esc(kw)}(?![a-z])`).exec(text); return m ? m.index + (m[0].length - kw.length) : -1; };
+  const countKw = (text, kw) => (text.match(new RegExp(`(?:^|[^a-z0-9])${esc(kw)}(?![a-z])`, "g")) || []).length;
+
+  /* ---------- dung tích ---------- */
+  const SIZE_RE = /(\d+(?:[.,]\d+)?)\s?(ml|mL|g|gr|gram|oz|fl\.?\s?oz|miếng|mieng|pcs|viên|vien|gói|goi|tuýp)(?![a-zA-Zà-ỹ])/i;
+  function findSize(text) {
+    const m = SIZE_RE.exec(text || "");
+    if (!m) return "";
+    let unit = m[2].toLowerCase().replace(/^gr(am)?$/, "g").replace("mieng", "miếng").replace("vien", "viên").replace("goi", "gói");
+    if (unit === "ml") unit = "ml";
+    return `${m[1].replace(",", ".")}${/^(ml|g|oz)$/.test(unit) ? "" : " "}${unit}`;
+  }
+  // dung tích ghi trong mô tả, chỉ lấy khi có nhãn rõ ràng ("Dung tích: 30ml")
+  function labeledSize(html) {
+    const t = String(html || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ");
+    const m = /(dung tích|thể tích|trọng lượng|khối lượng|quy cách|size|net wt\.?)[^0-9]{0,25}(\d+(?:[.,]\d+)?\s?[a-zA-Zà-ỹ.]+)/i.exec(t);
+    return m ? findSize(m[2]) : "";
+  }
+
+  /* ---------- danh mục ---------- */
+  const SUB_RULES = [
+    ["Bộ sản phẩm", "skincare", ["bo doi", "bo ba", "bo tu", "bo san pham", "combo", "set qua", "gift set", "duo", "trio", "kit"]],
+    ["Chống nắng", "skincare", ["chong nang", "sunscreen", "sunshield", "sun shield", "sunblock", "spf"]],
+    ["Làm sạch", "skincare", ["sua rua mat", "rua mat", "tay trang", "cleanser", "cleansing", "foaming gel", "micellar", "gel rua"]],
+    ["Toner", "skincare", ["toner", "nuoc can bang", "nuoc hoa hong", "lotion can bang"]],
+    ["Mặt nạ", "skincare", ["mat na", "mask", "masque"]],
+    ["Tẩy tế bào chết", "skincare", ["peel", "pad", "pads", "tay te bao", "tay da chet", "exfoliant", "exfoliating", "scrub"]],
+    ["Serum", "skincare", ["serum", "tinh chat", "essence", "ampoule", "concentrate", "booster", "treatment"]],
+    ["Kem dưỡng", "skincare", ["kem duong", "son duong", "kem mat", "eye cream", "moisturizer", "moisturiser", "cream", "creme", "lotion", "gel cream", "duong am", "hydrating"]],
+    ["Môi", "makeup", ["son", "lipstick", "lip tint", "son kem", "son thoi"]],
+    ["Nền", "makeup", ["cushion", "kem nen", "foundation", "phan phu", "che khuyet diem", "concealer", "kem lot", "primer"]],
+    ["Má & mắt", "makeup", ["ma hong", "blush", "phan mat", "eyeshadow", "mascara", "ke mat", "eyeliner", "chi ke may", "highlight"]],
+  ];
+  function pickSub(title, type, tags) {
+    const best = text => {
+      let win = null;
+      for (const [sub, cat, kws] of SUB_RULES) for (const kw of kws) {
+        const i = findKw(text, kw);
+        if (i >= 0 && (!win || i < win.i || (i === win.i && kw.length > win.len))) win = { sub, cat, i, len: kw.length };
+      }
+      return win;
+    };
+    const w = best(norm(title)) || best(norm(type)) || best(norm(tags.join(" | ")));
+    return w ? { sub: w.sub, cat: w.cat } : { sub: "Kem dưỡng", cat: "skincare" };
+  }
+
+  /* ---------- hoạt chất / nhu cầu / loại da ---------- */
+  const ACTIVE_RULES = [
+    ["Retinol", ["retinol", "retinal", "retinaldehyde", "retinoid", "retivance"]],
+    ["Vitamin C", ["vitamin c", "ascorbic", "ascorbyl", "professional-c"]],
+    ["Niacinamide", ["niacinamide", "vitamin b3"]],
+    ["BHA", ["bha", "salicylic"]],
+    ["AHA", ["aha", "glycolic", "lactic acid", "mandelic"]],
+    ["PHA", ["pha", "gluconolactone", "lactobionic"]],
+    ["Hyaluronic Acid", ["hyaluronic", "hyaluronate"]],
+    ["Ceramide", ["ceramide", "ceramides"]],
+    ["Peptide", ["peptide", "peptides"]],
+    ["Rau má", ["rau ma", "centella", "cica", "madecassoside"]],
+    ["Panthenol", ["panthenol", "vitamin b5"]],
+    ["Arbutin", ["arbutin", "alpha arbutin"]],
+    ["Tranexamic Acid", ["tranexamic"]],
+    ["Kinetin", ["kinetin"]],
+    ["Bakuchiol", ["bakuchiol"]],
+    ["Vitamin E", ["vitamin e", "tocopherol"]],
+    ["Màng lọc khoáng", ["zinc oxide", "titanium dioxide", "khoang chat"]],
+  ];
+  const CONCERN_RULES = [
+    ["Mụn", ["mun", "acne", "blemish", "clenziderm", "breakout"]],
+    ["Lỗ chân lông", ["lo chan long", "pore", "pores"]],
+    ["Lão hoá", ["lao hoa", "nep nhan", "anti-aging", "anti aging", "wrinkle", "wrinkles", "fine lines", "san chac", "tre hoa", "nang co", "elastiderm", "firming"]],
+    ["Thâm & sáng da", ["mo tham", "vet tham", "tham mun", "tham nam", "nam da", "sang da", "deu mau", "uneven", "uneven-tone", "pigment", "hyperpigmentation", "dark spot", "brightening", "claribright"]],
+    ["Cấp ẩm", ["cap am", "duong am", "hydrat", "hydrate", "hydrating", "hydrators", "moisture", "dry", "mat nuoc"]],
+    ["Nhạy cảm", ["nhay cam", "sensitive", "lam diu", "diu nhe", "phuc hoi", "barrier", "rebalance", "calming"]],
+  ];
+  const ACTIVE_CONCERN = { Retinol: ["Lão hoá"], "Vitamin C": ["Thâm & sáng da"], Niacinamide: ["Thâm & sáng da"], BHA: ["Mụn", "Lỗ chân lông"], AHA: ["Thâm & sáng da"], Arbutin: ["Thâm & sáng da"], "Tranexamic Acid": ["Thâm & sáng da"], "Hyaluronic Acid": ["Cấp ẩm"], Ceramide: ["Cấp ẩm", "Nhạy cảm"], Peptide: ["Lão hoá"], "Rau má": ["Nhạy cảm"], Panthenol: ["Nhạy cảm"], Bakuchiol: ["Lão hoá"] };
+  const SKIN_RULES = [
+    ["Da dầu", ["da dau", "oily", "normal to oily"]],
+    ["Da khô", ["da kho", "normal to dry", "dry skin"]],
+    ["Da hỗn hợp", ["da hon hop", "combination"]],
+    ["Da nhạy cảm", ["da nhay cam", "sensitive skin", "sensitive"]],
+    ["Mọi loại da", ["moi loai da", "all skin", "tat ca loai da"]],
+  ];
+  // khớp ở tiêu đề/tags là chắc chắn; trong mô tả cần lặp lại >= minBody lần
+  function detect(rules, head, body, minBody, max) {
+    const hit = [];
+    rules.forEach(([name, kws]) => {
+      const inHead = kws.some(k => findKw(head, k) >= 0);
+      const n = kws.reduce((s, k) => s + countKw(body, k), 0);
+      if (inHead || n >= minBody) hit.push({ name, score: (inHead ? 100 : 0) + n });
+    });
+    return hit.sort((a, b) => b.score - a.score).slice(0, max).map(h => h.name);
+  }
+
+  /* ---------- làm sạch mô tả ---------- */
+  const H_HOWTO = /^(huong dan su dung|cach su dung|cach dung|huong dan|how to use|directions)/;
+  const H_INGR = /^(thanh phan|bang thanh phan|ingredients|key ingredients|thanh phan chinh|thanh phan noi bat)/;
+  const H_STOP = /^(goi y routine|tham khao|tim hieu them|xem them|bai viet|lien he|mua ngay|chinh sach|dat hang|san pham lien quan|cau hoi thuong gap|faq|review|danh gia)/;
+  const isHeading = s => {
+    if (s.length > 70) return false;
+    const letters = s.replace(/[^\p{L}]/gu, "");
+    return /:$/.test(s) || (letters.length >= 3 && letters === letters.toUpperCase());
+  };
+  function cleanHtml(html) {
+    const out = { desc: [], howto: [], ingredients: [] };
+    if (!html) return { desc: "", howto: "", ingredients: "" };
+    const d = new DOMParser().parseFromString(String(html), "text/html");
+    d.querySelectorAll("script,style,iframe,img,video,svg,noscript,button,form,picture,source").forEach(e => e.remove());
+    d.querySelectorAll("br").forEach(e => e.replaceWith("\n"));
+    d.querySelectorAll("li").forEach(e => e.prepend("• "));
+    d.querySelectorAll("p,div,li,h1,h2,h3,h4,h5,h6,tr,section,ul,ol,blockquote,dt,dd").forEach(e => e.append("\n"));
+    const lines = (d.body ? d.body.textContent : "").split("\n").map(s => s.replace(/\s+/g, " ").trim())
+      .filter(s => s.replace(/[•\-–*\s]/g, "").length > 1 && !/https?:\/\//i.test(s));
+    let cur = "desc";
+    for (const line of lines) {
+      const n = norm(line.replace(/^[•\-–*\s]+/, ""));
+      if (isHeading(line) || H_HOWTO.test(n) || H_INGR.test(n) || H_STOP.test(n)) {
+        if (H_STOP.test(n)) { cur = "skip"; continue; }
+        if (H_HOWTO.test(n)) { cur = "howto"; const rest = line.replace(/^[^:]*:\s*/, ""); if (rest && rest !== line) out.howto.push(rest); continue; }
+        if (H_INGR.test(n)) { cur = "ingredients"; const rest = line.replace(/^[^:]*:\s*/, ""); if (rest && rest !== line) out.ingredients.push(rest); continue; }
+        cur = "desc";
+      }
+      if (cur !== "skip") out[cur].push(line);
+    }
+    const cap = (arr, max) => { let s = ""; for (const l of arr) { if ((s + "\n" + l).length > max) break; s += (s ? "\n" : "") + l; } return s; };
+    return { desc: cap(out.desc, 2500), howto: cap(out.howto, 1200), ingredients: cap(out.ingredients, 2000) };
+  }
+
+  /* ---------- đọc dữ liệu từng nền tảng ---------- */
+  const tagList = t => (Array.isArray(t) ? t : String(t || "").split(",")).map(x => (typeof x === "string" ? x : x && x.name) || "").map(s => s.trim()).filter(Boolean);
+  function fromShopify(p, origin) {
+    const vs = (p.variants || []).length ? p.variants : [{}];
+    const multi = vs.length > 1;
+    const imgs = (p.images || []).map(i => absUrl(i.src || i, origin)).filter(Boolean);
+    return vs.map(v => {
+      const vt = v.title && v.title !== "Default Title" ? v.title : "";
+      const vImg = v.featured_image && absUrl(v.featured_image.src, origin);
+      const price = Math.round(Number(v.price) || 0), cmp = Math.round(Number(v.compare_at_price) || 0);
+      const size = findSize(vt) || findSize(p.title) || labeledSize(p.body_html);
+      return {
+        key: `shopify-${p.id}-${v.id || 0}`,
+        sourceUrl: `${origin}/products/${p.handle}${multi && v.id ? `?variant=${v.id}` : ""}`,
+        name: p.title + (multi && vt && !findSize(vt) ? ` – ${vt}` : ""),
+        vendor: p.vendor || "", vol: size,
+        price: cmp > price ? cmp : price, salePrice: cmp > price ? price : 0,
+        images: uniq([vImg, ...imgs]), html: p.body_html || "",
+        sku: v.sku || "", available: v.available !== false, type: p.product_type || "", tags: tagList(p.tags),
+      };
+    });
+  }
+  function fromWoo(p) {
+    const pr = p.prices || {}, k = 10 ** (Number(pr.currency_minor_unit) || 0);
+    const reg = Math.round((Number(pr.regular_price) || Number(pr.price) || 0) / k), cur = Math.round((Number(pr.price) || 0) / k);
+    return [{
+      key: `woo-${p.id}`, sourceUrl: p.permalink || "", name: p.name || "",
+      vendor: ((p.brands || [])[0] || {}).name || "", vol: findSize(p.name) || labeledSize(p.description),
+      price: reg || cur, salePrice: cur && reg && cur < reg ? cur : 0,
+      images: uniq((p.images || []).map(i => i.src)), html: p.description || p.short_description || "",
+      sku: p.sku || "", available: p.is_in_stock !== false,
+      type: (p.categories || []).map(c => c.name).join(", "), tags: tagList(p.tags),
+    }];
+  }
+  function fromHtml(html, pageUrl) {
+    const d = new DOMParser().parseFromString(html, "text/html");
+    const nodes = [];
+    d.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
+      try { const j = JSON.parse(s.textContent); (Array.isArray(j) ? j : [j]).forEach(x => nodes.push(...(x["@graph"] || [x]))); } catch (e) {}
+    });
+    const isType = (n, t) => [].concat(n["@type"] || []).includes(t);
+    const items = nodes.filter(n => isType(n, "Product")).map((n, i) => {
+      const offers = [].concat(n.offers || [])[0] || {};
+      const price = Math.round(Number(offers.price || offers.lowPrice || (offers.priceSpecification || {}).price) || 0);
+      return {
+        key: `ld-${i}-${n.sku || n.name}`, sourceUrl: absUrl(n.url || pageUrl, pageUrl), name: n.name || "",
+        vendor: (typeof n.brand === "string" ? n.brand : (n.brand || {}).name) || "", vol: findSize(n.name),
+        price, salePrice: 0, images: uniq([].concat(n.image || []).map(x => absUrl(typeof x === "string" ? x : x.url, pageUrl))),
+        html: (n.description || "").replace(/\n/g, "<br>"), sku: n.sku || "",
+        available: !/OutOfStock/i.test(offers.availability || ""), type: n.category || "", tags: [],
+      };
+    });
+    if (items.length) return items;
+    const meta = p => (d.querySelector(`meta[property="${p}"],meta[name="${p}"]`) || {}).content || "";
+    const title = meta("og:title") || (d.querySelector("h1") || {}).textContent || "";
+    if (!title.trim()) return [];
+    return [{
+      key: `og-${pageUrl}`, sourceUrl: pageUrl, name: title.trim(), vendor: meta("product:brand") || "", vol: findSize(title),
+      price: Math.round(Number(meta("product:price:amount") || meta("og:price:amount")) || 0), salePrice: 0,
+      images: uniq([absUrl(meta("og:image"), pageUrl)]), html: meta("og:description") || meta("description"),
+      sku: "", available: true, type: "", tags: [],
+    }];
+  }
+
+  /* ---------- kế hoạch tải theo link ---------- */
+  function plan(input) {
+    const u = new URL(input.trim()), o = u.origin, parts = u.pathname.split("/").filter(Boolean);
+    const out = [];
+    const pi = parts.indexOf("products"), ci = parts.indexOf("collections");
+    if (pi >= 0 && parts[pi + 1]) out.push({ kind: "shopify-one", url: `${o}/products/${parts[pi + 1].replace(/\.(json|js)$/, "")}.json` });
+    else if (ci >= 0 && parts[ci + 1]) out.push({ kind: "shopify-list", url: `${o}/collections/${parts[ci + 1]}/products.json?limit=250` });
+    else out.push({ kind: "shopify-list", url: `${o}/products.json?limit=250` });
+    const wi = parts.findIndex(p => p === "product" || p === "san-pham");
+    out.push({ kind: "woo", url: wi >= 0 && parts[wi + 1] ? `${o}/wp-json/wc/store/v1/products?slug=${encodeURIComponent(parts[wi + 1])}` : `${o}/wp-json/wc/store/v1/products?per_page=100` });
+    out.push({ kind: "html", url: u.toString() });
+    return out;
+  }
+  const cleanBrand = v => (v || "").replace(/\s*[-–|]\s*(viet\s?nam|việt\s?nam|vn|official|store|shop|chinh hang|chính hãng).*$/i, "").replace(/\s+(viet\s?nam|việt\s?nam|vn)$/i, "").trim();
+  const hostBrand = url => { try { const h = new URL(url).hostname.replace(/^www\./, "").split(".")[0]; return h.charAt(0).toUpperCase() + h.slice(1); } catch (e) { return ""; } };
+
+  /* ---------- chuyển thành sản phẩm Luna ---------- */
+  const SHAPE = { "Làm sạch": "tube", Toner: "bottle", Serum: "dropper", "Kem dưỡng": "jar", "Chống nắng": "tube", "Tẩy tế bào chết": "bottle", "Mặt nạ": "jar", "Bộ sản phẩm": "jar", Môi: "lipstick", Nền: "compact", "Má & mắt": "compact" };
+  const TINT = { "Làm sạch": "#f3e3dc", Toner: "#e4ecf1", Serum: "#f2e6d6", "Kem dưỡng": "#f5e9e2", "Chống nắng": "#fbf0d9", "Tẩy tế bào chết": "#f3ead8", "Mặt nạ": "#e3eee6", "Bộ sản phẩm": "#efe4ef", Môi: "#f0d6d0", Nền: "#f3e2d4", "Má & mắt": "#f7ddd2" };
+  // Giá bán: giữ giá hãng, hoặc giảm x% so với giá hãng đang bán
+  function calcPrice(item, opts) {
+    const price = item.price;
+    let sale = item.salePrice || null;
+    if (opts.priceMode === "discount" && opts.pct > 0) {
+      const base = item.salePrice || item.price, s = round1000(base * (1 - opts.pct / 100));
+      sale = s > 0 && s < price ? s : sale;
+    }
+    return { price, sale };
+  }
+  function toProduct(item, opts) {
+    const c = cleanHtml(item.html);
+    const head = norm([item.name, item.type, item.tags.join(" | ")].join(" | "));
+    const body = norm(c.desc + "\n" + c.howto + "\n" + c.ingredients);
+    const { sub, cat } = pickSub(item.name, item.type, item.tags);
+    const actives = detect(ACTIVE_RULES, norm(item.name + " | " + item.tags.join(" | ")), body, 2, 4);
+    let concerns = detect(CONCERN_RULES, head, body, 2, 3);
+    actives.forEach(a => (ACTIVE_CONCERN[a] || []).forEach(x => { if (!concerns.includes(x) && concerns.length < 3) concerns.push(x); }));
+    let skin = detect(SKIN_RULES, head, body, 1, 5);
+    if (skin.includes("Mọi loại da") || skin.length >= 4 || !skin.length) skin = ["Mọi loại da"];
+    const finalCat = opts.cat && opts.cat !== "auto" ? opts.cat : cat;
+    const { price, sale } = calcPrice(item, opts);
+    return {
+      name: item.name.trim().slice(0, 200), brand: (opts.brand || cleanBrand(item.vendor) || hostBrand(item.sourceUrl)).slice(0, 80),
+      origin: opts.origin || "", cat: finalCat, sub: finalCat === "makeup" && cat !== "makeup" ? "Nền" : sub, vol: item.vol || "",
+      price, sale, is_new: true, in_stock: item.available, visible: !!opts.visible, pop: 5,
+      actives, skin, concerns: finalCat === "makeup" ? [] : concerns,
+      images: item.images.slice(0, 5), descr: c.desc, howto: c.howto, ingredients: c.ingredients,
+      shape: SHAPE[sub] || "bottle", tint: TINT[sub] || "#f2e6d6",
+    };
+  }
+
+  g.LunaImport = { plan, fromShopify, fromWoo, fromHtml, toProduct, calcPrice, cleanHtml, pickSub, findSize, cleanBrand, hostBrand, norm,
+    SUBS: SUB_RULES.map(r => r[0]), MAKEUP: SUB_RULES.filter(r => r[1] === "makeup").map(r => r[0]), SHAPE, TINT };
+})(typeof window !== "undefined" ? window : globalThis);

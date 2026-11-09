@@ -65,6 +65,7 @@
     <section id="v-products" class="view" hidden>
       <div class="a-toolbar">
         <input id="pSearch" type="search" placeholder="Tìm tên, thương hiệu…" aria-label="Tìm sản phẩm">
+        <button class="btn ghost" type="button" id="pImport">Nhập từ web hãng</button>
         <button class="btn" type="button" id="pNew">Thêm sản phẩm</button>
       </div>
       <p class="result" id="pCount"></p>
@@ -137,10 +138,15 @@
   <div class="dh"><h2 id="kTitle">Kho</h2><button class="x" type="button" id="kClose" aria-label="Đóng">×</button></div>
   <div class="db" id="kBody"></div>
 </aside>
+<aside class="drawer editor wide" id="iPanel" aria-label="Nhập sản phẩm từ web hãng">
+  <div class="dh"><h2>Nhập từ web hãng</h2><button class="x" type="button" id="iClose" aria-label="Đóng">×</button></div>
+  <div class="db" id="iBody"></div>
+</aside>
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script>window.ADMIN = __ADMIN_CONFIG__;</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="/admin/import-map.js"></script>
 <script src="/admin/admin.js"></script>
 </body>
 </html>

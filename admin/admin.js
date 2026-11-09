@@ -272,6 +272,243 @@
   }
   function closeEditor() { $("editor").classList.remove("on"); $("scrim").classList.remove("on"); editing = null; }
 
+  /* ================= NHẬP TỪ WEB HÃNG ================= */
+  const LI = window.LunaImport;
+  let imp = { rows: [], busy: false, platform: "", query: "" };
+  const ORIGINS = ["Mỹ", "Hàn", "Nhật", "Pháp", "Úc", "Đức", "Anh", "Thuỵ Sĩ", "Canada", "Ý", "Tây Ban Nha", "Thái Lan", "Việt Nam"];
+  async function proxy(url) {
+    const { data: { session } } = await sb.auth.getSession();
+    const r = await fetch("/api/fetch-url", { method: "POST", headers: { Authorization: `Bearer ${session.access_token}`, "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+    if (!r.ok) {
+      let m = `HTTP ${r.status}`;
+      try { const j = await r.clone().json(); if (j && j.error) m = j.error; } catch (e) {}
+      const err = new Error(m); err.status = r.status; throw err;
+    }
+    return r;
+  }
+  async function getJson(url) { const t = await (await proxy(url)).text(); try { return JSON.parse(t); } catch (e) { return null; } }
+  const iStatus = m => { const el = $("iErr"); if (el) { el.textContent = m; el.classList.toggle("muted", !!m && !/^Không|lỗi|Lỗi/.test(m)); } };
+
+  async function loadSource(input) {
+    const origin = new URL(input).origin;
+    let lastErr = null;
+    for (const s of LI.plan(input)) {
+      try {
+        if (s.kind === "shopify-one") {
+          const j = await getJson(s.url);
+          if (j && j.product) return { platform: "Shopify", items: LI.fromShopify(j.product, origin) };
+        } else if (s.kind === "shopify-list") {
+          const all = [];
+          for (let page = 1; page <= 10; page++) {
+            const j = await getJson(`${s.url}&page=${page}`);
+            if (!j || !Array.isArray(j.products) || !j.products.length) break;
+            all.push(...j.products); iStatus(`Đang đọc… ${all.length} sản phẩm`);
+            if (j.products.length < 250) break;
+          }
+          if (all.length) return { platform: "Shopify", items: all.flatMap(p => LI.fromShopify(p, origin)) };
+        } else if (s.kind === "woo") {
+          const one = s.url.includes("slug="), all = [];
+          for (let page = 1; page <= 10; page++) {
+            const j = await getJson(one ? s.url : `${s.url}&page=${page}`);
+            if (!Array.isArray(j) || !j.length) break;
+            all.push(...j); iStatus(`Đang đọc… ${all.length} sản phẩm`);
+            if (one || j.length < 100) break;
+          }
+          if (all.length) return { platform: "WooCommerce", items: all.flatMap(LI.fromWoo) };
+        } else {
+          const r = await proxy(s.url);
+          const items = LI.fromHtml(await r.text(), r.headers.get("X-Final-Url") || s.url);
+          if (items.length) return { platform: "Trang sản phẩm", items };
+        }
+      } catch (e) {
+        if (e.status === 401 || e.status === 403 && /admin|đăng nhập/i.test(e.message)) throw e;
+        lastErr = e;
+      }
+    }
+    throw new Error(lastErr && lastErr.status >= 500 ? `Không tải được trang (${lastErr.message}).` : "Không đọc được sản phẩm từ link này. Thử dán link của từng trang sản phẩm.");
+  }
+
+  function readOpts() {
+    const v = id => ($(id) ? $(id).value.trim() : "");
+    return {
+      brand: v("iBrand"), origin: v("iOrigin"), cat: v("iCat") || "auto",
+      priceMode: v("iPriceMode") || "keep", pct: Math.max(0, Math.min(90, Number(v("iPct")) || 0)),
+      imgs: $("iImgs") ? $("iImgs").checked : true, visible: $("iVisible") ? $("iVisible").checked : false, skipDup: $("iSkipDup") ? $("iSkipDup").checked : true,
+    };
+  }
+  async function openImport() {
+    imp = { rows: [], busy: false, platform: "", query: "" };
+    $("iBody").innerHTML = `
+      <form id="iForm" class="panel" novalidate>
+        <label class="f" for="iUrl">Link trang danh mục hoặc trang sản phẩm của hãng / nhà cung cấp<input id="iUrl" type="url" inputmode="url" placeholder="https://www.obagi.vn/collections/shop-all" required></label>
+        <p class="hint">Hỗ trợ web làm bằng Shopify (ví dụ obagi.vn), WooCommerce và trang sản phẩm có dữ liệu chuẩn. Dán link danh mục để lấy nhiều sản phẩm một lần.</p>
+        <p class="err" id="iErr" role="alert"></p>
+        <button class="btn" type="submit" id="iLoad">Tải danh sách sản phẩm</button>
+      </form>
+      <div id="iResult"></div>`;
+    $("iPanel").classList.add("on"); $("scrim").classList.add("on");
+    setTimeout(() => $("iUrl").focus(), 50);
+    try { await ensureProducts(); } catch (e) {}
+  }
+  function closeImport() { if (imp.busy) { toast("Đang nhập sản phẩm, vui lòng đợi xong"); return false; } $("iPanel").classList.remove("on"); $("scrim").classList.remove("on"); return true; }
+
+  async function doLoad() {
+    let url = $("iUrl").value.trim();
+    if (url && !/^https?:\/\//i.test(url)) url = "https://" + url;
+    try { new URL(url); } catch (e) { iStatus("Không đúng định dạng link, ví dụ https://www.obagi.vn/collections/shop-all"); return; }
+    const btn = $("iLoad"); btn.disabled = true; btn.textContent = "Đang tải…"; iStatus("Đang đọc trang…"); $("iResult").innerHTML = "";
+    try {
+      const { platform, items } = await loadSource(url);
+      const have = new Set(products.map(p => LI.norm(p.name)));
+      const seen = new Set();
+      imp.platform = platform;
+      imp.rows = items.filter(it => it.name && !seen.has(it.key) && seen.add(it.key)).map(it => {
+        const { sub } = LI.pickSub(it.name, it.type, it.tags);
+        const dup = have.has(LI.norm(it.name));
+        return { item: it, name: it.name, vol: it.vol || "", sub, dup, sel: !dup && it.price > 0 };
+      });
+      iStatus("");
+      renderImport(url);
+    } catch (e) { iStatus(e.message); }
+    btn.disabled = false; btn.textContent = "Tải danh sách sản phẩm";
+  }
+
+  function renderImport(url) {
+    const vendors = imp.rows.map(r => LI.cleanBrand(r.item.vendor)).filter(Boolean);
+    const brand = vendors.sort((a, b) => vendors.filter(v => v === b).length - vendors.filter(v => v === a).length)[0] || LI.hostBrand(url);
+    const subs = [...new Set([...LI.SUBS, ...(CFG.taxonomy?.subs || []), ...products.map(p => p.sub)])];
+    $("iResult").innerHTML = `
+      <div class="panel">
+        <legend>Áp dụng cho tất cả sản phẩm nhập lần này</legend>
+        <div class="two">
+          <label class="f" for="iBrand">Thương hiệu<input id="iBrand" value="${esc(brand)}"></label>
+          <label class="f" for="iOrigin">Xuất xứ<input id="iOrigin" list="iOrigins" placeholder="Mỹ, Hàn, Nhật…"><datalist id="iOrigins">${ORIGINS.map(o => `<option value="${o}">`).join("")}</datalist></label>
+          <label class="f" for="iCat">Nhóm<select id="iCat"><option value="auto">Tự nhận theo danh mục</option><option value="skincare">Skincare</option><option value="makeup">Makeup</option></select></label>
+          <div class="f">Giá bán
+            <div class="price-mode"><select id="iPriceMode" aria-label="Cách tính giá bán"><option value="keep">Giữ giá hãng</option><option value="discount">Giảm so với giá hãng</option></select>
+            <label class="pct" for="iPct"><input id="iPct" type="number" min="0" max="90" step="1" value="10" aria-label="Phần trăm giảm" disabled>%</label></div></div>
+        </div>
+        <div class="cks">
+          <label><input type="checkbox" id="iImgs" checked>Tải ảnh về kho ảnh của shop</label>
+          <label><input type="checkbox" id="iVisible">Hiện ngay trên web</label>
+          <label><input type="checkbox" id="iSkipDup" checked>Bỏ qua sản phẩm đã có</label>
+        </div>
+        <p class="hint">Mặc định nhập ở chế độ ẩn để bạn kiểm tra rồi bật “Hiện trên web”. Mô tả lấy từ web hãng nên được viết lại bằng lời của shop để tốt cho Google. Chỉ dùng ảnh khi được hãng hoặc nhà phân phối cho phép.</p>
+      </div>
+      <div class="i-bar">
+        <label class="i-all"><input type="checkbox" id="iAll"> <span id="iCount"></span></label>
+        <input id="iFilter" type="search" placeholder="Lọc theo tên…" aria-label="Lọc sản phẩm">
+      </div>
+      <div class="i-list" id="iList">${imp.rows.map((r, i) => `
+        <div class="i-row${r.dup ? " dup" : ""}" data-row="${i}">
+          <input type="checkbox" data-isel="${i}" aria-label="Chọn ${esc(r.name)}"${r.sel ? " checked" : ""}>
+          <div class="p-thumb" style="background:var(--sand)">${r.item.images[0] ? `<img src="${esc(r.item.images[0])}" alt="" loading="lazy" referrerpolicy="no-referrer">` : ""}</div>
+          <div class="i-main">
+            <label class="sr" for="in${i}">Tên sản phẩm</label>
+            <input id="in${i}" class="i-name" data-ifield="name" data-i="${i}" value="${esc(r.name)}">
+            <div class="i-meta">
+              <label class="sr" for="iv${i}">Dung tích</label><input id="iv${i}" class="i-vol" data-ifield="vol" data-i="${i}" value="${esc(r.vol)}" placeholder="Dung tích">
+              <label class="sr" for="is${i}">Danh mục</label><select id="is${i}" data-ifield="sub" data-i="${i}">${subs.map(s => `<option${s === r.sub ? " selected" : ""}>${esc(s)}</option>`).join("")}</select>
+              ${r.dup ? `<span class="st-chip warn">Đã có</span>` : ""}${r.item.available ? "" : `<span class="st-chip">Hãng hết hàng</span>`}${r.item.price ? "" : `<span class="st-chip bad">Không có giá</span>`}
+            </div>
+          </div>
+          <div class="i-price num" data-price="${i}"></div>
+        </div>`).join("")}</div>
+      <div class="i-foot">
+        <div id="iProg" class="hint"></div>
+        <button class="btn" type="button" id="iRun">Nhập sản phẩm</button>
+      </div>`;
+    syncImport();
+  }
+  function syncImport() {
+    if (!$("iList")) return;
+    const o = readOpts();
+    $("iPct").disabled = o.priceMode !== "discount";
+    const q = LI.norm(imp.query);
+    let shown = 0;
+    imp.rows.forEach((r, i) => {
+      const row = $("iList").querySelector(`[data-row="${i}"]`);
+      const vis = !q || LI.norm(r.name).includes(q);
+      row.hidden = !vis; if (vis) shown++;
+      const { price, sale } = LI.calcPrice(r.item, o);
+      row.querySelector(`[data-price="${i}"]`).innerHTML = price ? (sale ? `<s class="muted">${vnd(price)}</s><br><strong>${vnd(sale)}</strong>` : `<strong>${vnd(price)}</strong>`) : `<span class="muted">—</span>`;
+      row.classList.toggle("skip", o.skipDup && r.dup);
+    });
+    const n = imp.rows.filter(r => r.sel && !(o.skipDup && r.dup) && r.item.price > 0).length;
+    $("iCount").textContent = `${imp.platform}: ${imp.rows.length} sản phẩm${q ? ` (đang hiện ${shown})` : ""} · đã chọn ${n}`;
+    $("iAll").checked = imp.rows.length > 0 && imp.rows.every(r => r.sel);
+    $("iRun").textContent = n ? `Nhập ${n} sản phẩm` : "Chọn sản phẩm để nhập";
+    $("iRun").disabled = !n || imp.busy;
+  }
+
+  async function fetchImage(src) {
+    let u = src;
+    if (/cdn\.shopify\.com|\/cdn\/shop\//.test(u)) u += (u.includes("?") ? "&" : "?") + "width=1200";
+    try { const r = await fetch(u, { mode: "cors", referrerPolicy: "no-referrer" }); if (r.ok) return await r.blob(); } catch (e) {}
+    return await (await proxy(u)).blob();
+  }
+  async function copyImages(urls, name) {
+    const out = [];
+    for (const [i, src] of urls.entries()) {
+      try {
+        const blob = await fetchImage(src);
+        if (!/^image\/(jpeg|png|webp|gif|avif)$/.test(blob.type) || blob.size > 5 * 1024 * 1024) continue;
+        const ext = blob.type.split("/")[1].replace("jpeg", "jpg");
+        const path = `${slug(name)}-${Date.now().toString(36)}-${i}.${ext}`;
+        const { error } = await sb.storage.from("product-images").upload(path, blob, { cacheControl: "31536000", upsert: false, contentType: blob.type });
+        if (error) throw error;
+        out.push(sb.storage.from("product-images").getPublicUrl(path).data.publicUrl);
+      } catch (e) { console.warn("Không chép được ảnh", src, e); }
+    }
+    return out.length ? out : urls; // chép lỗi hết thì giữ link ảnh gốc
+  }
+  async function runImport() {
+    const o = readOpts();
+    const chosen = imp.rows.filter(r => r.sel && !(o.skipDup && r.dup) && r.item.price > 0);
+    if (!chosen.length || imp.busy) return;
+    imp.busy = true; syncImport();
+    $("iResult").querySelectorAll("input,select").forEach(el => (el.disabled = true));
+    let ok = 0; const errs = [];
+    for (const [n, r] of chosen.entries()) {
+      $("iProg").textContent = `Đang nhập ${n + 1}/${chosen.length}: ${r.name}`;
+      try {
+        const p = LI.toProduct({ ...r.item, name: r.name.trim() || r.item.name, vol: r.vol.trim() }, o);
+        p.sub = r.sub;
+        p.cat = o.cat !== "auto" ? o.cat : LI.MAKEUP.includes(r.sub) ? "makeup" : "skincare";
+        if (p.cat === "makeup") p.concerns = [];
+        p.shape = LI.SHAPE[r.sub] || p.shape; p.tint = LI.TINT[r.sub] || p.tint;
+        if (o.imgs && p.images.length) p.images = await copyImages(p.images, p.name);
+        const { data, error } = await sb.from("products").insert(p).select().single();
+        if (error) throw error;
+        products.push(data); r.dup = true; r.sel = false; ok++;
+        const el = $("iList").querySelector(`[data-row="${imp.rows.indexOf(r)}"]`);
+        if (el) { el.classList.add("dup"); el.querySelector("[data-isel]").checked = false; el.querySelector(".i-meta").insertAdjacentHTML("beforeend", `<span class="st-chip good">Đã nhập</span>`); }
+      } catch (e) { errs.push(`${r.name}: ${e.message}`); }
+    }
+    imp.busy = false;
+    $("iResult").querySelectorAll("input,select").forEach(el => (el.disabled = false));
+    $("iProg").innerHTML = `<strong>Đã nhập ${ok}/${chosen.length} sản phẩm.</strong>${o.visible ? "" : " Sản phẩm đang ẩn: vào danh sách sản phẩm, sửa lại rồi bật “Hiện trên web”."}${errs.length ? `<br><span class="err">Lỗi: ${errs.map(esc).join("; ")}</span>` : ""}`;
+    loaded.stock = false; renderProducts(); syncImport();
+    if (ok && o.visible) needRebuild(true);
+    toast(`Đã nhập ${ok} sản phẩm`);
+  }
+  document.addEventListener("click", e => {
+    const t = e.target.closest("button"); if (!t) return;
+    if (t.id === "pImport") openImport();
+    else if (t.id === "iClose") closeImport();
+    else if (t.id === "iRun") runImport();
+  });
+  document.addEventListener("submit", e => { if (e.target.id === "iForm") { e.preventDefault(); doLoad(); } });
+  document.addEventListener("change", e => {
+    const t = e.target, d = t.dataset;
+    if (!t.closest || !t.closest("#iResult")) return;
+    if (d.isel !== undefined) imp.rows[Number(d.isel)].sel = t.checked;
+    else if (t.id === "iAll") imp.rows.forEach((r, i) => { const row = $("iList").querySelector(`[data-row="${i}"]`); if (!row.hidden) { r.sel = t.checked; row.querySelector("[data-isel]").checked = t.checked; } });
+    else if (d.ifield) imp.rows[Number(d.i)][d.ifield] = t.value;
+    syncImport();
+  });
+  document.addEventListener("input", e => { if (e.target.id === "iFilter") { imp.query = e.target.value; syncImport(); } else if (e.target.id === "iPct") syncImport(); });
+
   /* ================= KHO ================= */
   let inv = {}, sold30 = {}, kFilter = "all", kQuery = "", kProduct = null;
   const KIND = { nhap: "Nhập hàng", ban: "Bán", huy_don: "Hoàn kho (huỷ đơn)", tra: "Khách trả hàng", hong: "Hàng hỏng / hết hạn", kiem_ke: "Kiểm kê" };
@@ -658,8 +895,9 @@
   $("kSearch").addEventListener("input", e => { kQuery = e.target.value; renderStock(); });
   $("oSearch").addEventListener("input", e => { oQuery = e.target.value; renderOrders(); });
   $("pSearch").addEventListener("input", e => { pQuery = e.target.value; renderProducts(); });
-  $("scrim").addEventListener("click", () => { closeEditor(); closeStock(); });
-  document.addEventListener("keydown", e => { if (e.key === "Escape") { closeEditor(); closeStock(); } });
+  const closePanels = () => { if (!closeImport()) return; closeEditor(); closeStock(); };
+  $("scrim").addEventListener("click", closePanels);
+  document.addEventListener("keydown", e => { if (e.key === "Escape") closePanels(); });
 
   /* ---------- khởi động ---------- */
   sb.auth.getSession().then(({ data: { session } }) => (session ? enter(session) : showLogin()));

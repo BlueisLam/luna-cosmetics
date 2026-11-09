@@ -162,3 +162,26 @@ input[type=color]{height:42px;padding:4px}
   .two-col{grid-template-columns:minmax(0,1fr)}
   .tiles.compact{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 }
+
+/* ---------- nhập từ web hãng ---------- */
+.drawer.wide{width:min(980px,100%)}
+.price-mode{display:flex;gap:8px;align-items:center}
+.price-mode select{flex:1}
+.pct{display:flex;align-items:center;gap:4px;width:110px}
+.pct input{text-align:right}
+.i-bar{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;position:sticky;top:-16px;background:var(--bg);padding-block:8px;z-index:1}
+.i-all{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted)}
+.i-all input,.i-row>input[type=checkbox]{width:18px;height:18px;padding:0;accent-color:var(--rose-deep);flex:none}
+.i-bar input[type=search]{width:auto;flex:1;max-width:280px;border-radius:999px;padding:8px 14px}
+.i-list{display:grid;gap:6px}
+.i-row{display:grid;grid-template-columns:22px 52px minmax(0,1fr) 120px;gap:10px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:8px 10px}
+.i-row.skip{opacity:.5}
+.i-main{display:grid;gap:6px;min-width:0}
+.i-name{font-weight:500;padding:7px 10px}
+.i-meta{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.i-meta input,.i-meta select{width:auto;padding:5px 10px;font-size:13px;border-radius:999px}
+.i-vol{max-width:110px}
+.i-price{font-size:13px;line-height:1.4}
+.i-foot{position:sticky;bottom:-16px;background:var(--bg);padding-block:12px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;border-top:1px solid var(--line)}
+.err.muted{color:var(--muted)}
+@media (max-width:640px){.i-row{grid-template-columns:22px 44px minmax(0,1fr)}.i-price{grid-column:3;text-align:left}}

@@ -63,6 +63,18 @@ Trên admin, mỗi đơn có ô **Đơn vị vận chuyển** và **Mã vận đ
 
 Link xem hành trình của từng hãng nằm trong `site.json` → `carriers` (`{code}` là chỗ điền mã vận đơn). Hãng nào để `url` trống thì web chỉ hiện mã vận đơn để khách tự tra. Bạn nên bấm thử link của từng hãng sau lần gửi hàng đầu tiên, nếu hãng đổi đường dẫn thì sửa lại trong file này.
 
+## Nhập sản phẩm từ web hãng / nhà cung cấp
+
+Admin → **Sản phẩm** → **Nhập từ web hãng**. Dán link trang danh mục (ví dụ `https://www.obagi.vn/collections/shop-all`) hoặc link một trang sản phẩm, bấm **Tải danh sách sản phẩm**.
+- Hỗ trợ web làm bằng **Shopify** (obagi.vn…), **WooCommerce**, và trang sản phẩm có dữ liệu chuẩn (JSON-LD). Web khác: dán link từng trang sản phẩm.
+- Tự lấy: tên, dung tích, giá (cả giá gốc nếu hãng đang giảm), ảnh, mô tả, cách dùng, thành phần. Tự đoán danh mục, hoạt chất, nhu cầu, loại da. Bỏ phần "gợi ý routine", link bài viết của hãng.
+- Trước khi nhập: sửa tên, dung tích, danh mục từng món; chọn thương hiệu, xuất xứ, giá bán (giữ giá hãng hoặc giảm x%) cho cả lần nhập.
+- Ảnh được chép về kho ảnh của shop (Supabase Storage), không phụ thuộc web hãng.
+- Mặc định nhập ở chế độ **ẩn**: kiểm tra, viết lại mô tả, nhập kho rồi mới bật "Hiện trên web" và bấm Cập nhật web.
+- Sản phẩm trùng tên với sản phẩm đã có được gắn "Đã có" và bỏ qua.
+
+Lưu ý: nên viết lại mô tả bằng lời của shop (Google ưu tiên nội dung riêng), và chỉ dùng ảnh khi được hãng hoặc nhà phân phối cho phép. Một số web chặn máy chủ đọc tự động; khi đó dán link từng trang sản phẩm hoặc thêm tay.
+
 ## Quản lý kho
 
 Mục **Kho** trên admin. Sản phẩm "Chưa quản lý kho" bán không giới hạn như trước. Bấm **Nhập hàng** lần đầu (kèm giá vốn) là sản phẩm bắt đầu được quản lý:
@@ -105,7 +117,9 @@ Trạng thái đơn: Chờ thanh toán (chuyển khoản, hoặc COD cần cọc
 | `site.json` | Thông tin shop, tên miền, Zalo, **số tài khoản ngân hàng**, khoá Supabase |
 | `supabase/` | `schema.sql` (bảng, bảo mật, hàm đặt hàng), `seed.sql` (sản phẩm mẫu) |
 | `admin/` | Trang quản lý |
-| `functions/api/` | Cloudflare Pages Functions: `rebuild` (nút Cập nhật web), `order-webhook` (báo Telegram) |
+| `functions/api/` | Cloudflare Pages Functions: `rebuild` (nút Cập nhật web), `order-webhook` (báo Telegram), `fetch-url` (đọc web hãng, chỉ admin) |
+| `server/auth.js` | Kiểm tra quyền admin, dùng chung cho các function |
+| `admin/import-map.js` | Đọc dữ liệu Shopify / WooCommerce / JSON-LD và chuyển thành sản phẩm |
 | `public/_headers` | Header bảo mật và chống cache code cũ |
 | `data/products.json` | Sản phẩm dự phòng khi chưa nối Supabase |
 | `data/taxonomy.json` | Mô tả danh mục, nhu cầu da, hoạt chất, nội dung trang chính sách |
