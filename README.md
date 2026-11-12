@@ -154,7 +154,25 @@ Trạng thái đơn: Chờ thanh toán (chuyển khoản, hoặc COD cần cọc
 1. Cloudflare → project → **Custom domains → Set up a custom domain**, nhập tên miền và làm theo hướng dẫn (tên miền quản lý trên Cloudflare thì tự động trỏ).
 2. Đổi biến `SITE_URL` (hoặc `"url"` trong `site.json`) thành tên miền mới, rồi Retry deployment.
 3. Supabase → Authentication → URL Configuration: đổi Site URL sang tên miền mới.
-4. Google Search Console → gửi `https://<tên-miền>/sitemap.xml`. Google Merchant Center để hiện ở tab Mua sắm.
+4. Google Search Console → thêm tên miền, chọn xác minh bằng thẻ HTML, dán phần `content` vào `"googleSiteVerification"` trong `site.json`, đẩy lên rồi bấm Xác minh. Sau đó gửi `https://<tên-miền>/sitemap.xml`.
+5. Google Merchant Center (hiện sản phẩm miễn phí ở tab Mua sắm của Google) → Sản phẩm → Nguồn dữ liệu → thêm nguồn theo đường link `https://<tên-miền>/google-merchant.xml`, lấy định kỳ mỗi ngày.
+
+## SEO đã có sẵn
+
+- Mỗi trang có tiêu đề, mô tả, link chuẩn (canonical), ảnh khi chia sẻ Facebook/Zalo (ảnh sản phẩm, hoặc `public/og.png` cho trang khác).
+- Dữ liệu cho Google: cửa hàng (logo, liên hệ, đổi trả 7 ngày), sản phẩm (giá, còn hàng, phân loại, giao hàng miễn phí khi chuyển khoản, đổi trả), đường dẫn (breadcrumb), danh sách sản phẩm.
+- Sitemap có kèm ảnh sản phẩm; trang danh mục / thương hiệu nhiều sản phẩm tự chia trang (48 sản phẩm / trang).
+- Nguồn dữ liệu Google Merchant: `/google-merchant.xml` (sản phẩm có ảnh mới vào nguồn).
+- Chân trang có link tới mọi danh mục, thương hiệu, nhu cầu để Google đi được khắp web.
+- Lưu ý: link sản phẩm tạo từ **tên + thương hiệu**. Khi Google đã lên trang, hạn chế đổi tên sản phẩm (đổi tên là đổi link).
+- Viết mô tả bằng lời của shop (không chép nguyên văn web hãng) giúp lên top tốt hơn; mục Sản phẩm có bộ lọc **Thiếu mô tả**, **Thiếu ảnh** để bổ sung dần.
+
+## Quản lý nhiều sản phẩm
+
+- Admin → Sản phẩm: lọc theo thương hiệu, danh mục, trạng thái (đang ẩn, hết hàng, đang giảm giá, thiếu ảnh, thiếu mô tả…), sắp xếp, 50 sản phẩm / trang.
+- Tick ô vuông đầu dòng (hoặc **Chọn tất cả sản phẩm đang lọc**) để sửa hàng loạt: hiện / ẩn, gắn Mới về, **giảm giá theo % hoặc số tiền**, bỏ giảm giá, tăng / giảm giá gốc theo %, đổi danh mục, đổi thương hiệu, xoá.
+- **Xuất file Excel (CSV)** → sửa cột `gia_goc`, `gia_sale` (hoặc `giam_pct`), `hien`, `con_hang`, `moi_ve` → **Cập nhật giá bằng file CSV**: xem trước các thay đổi rồi mới bấm cập nhật.
+- Sửa một sản phẩm: mục **Giảm giá** chọn *Giảm theo %*, *Giảm số tiền* hoặc *Nhập giá sau giảm*; nút **Áp dụng cho mọi phân loại**.
 
 ## Chạy thử trên máy
 

@@ -23,6 +23,7 @@ const esc = s => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").re
 const slug = s => String(s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/&/g, " va ").replace(/%/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const vnd = n => n.toLocaleString("vi-VN").replace(/,/g, ".") + "đ";
 const priceOf = p => p.sale || p.price;
+const absImg = i => (String(i).startsWith("http") ? i : BASE + i);
 // văn bản nhiều dòng → đoạn văn; dòng bắt đầu bằng "•" hoặc "-" → danh sách
 function rich(text) {
   const lines = String(text || "").split(/\n+/).map(s => s.trim()).filter(Boolean);
@@ -36,8 +37,11 @@ function rich(text) {
   return html;
 }
 const oneLine = s => String(s || "").replace(/\s*\n+\s*/g, " ").replace(/^[•\-–*]\s*/, "").trim();
+// cắt mô tả ~155 ký tự, không cắt giữa chữ
+const clip = (t, n = 155) => { t = String(t || "").replace(/\s+/g, " ").trim(); return t.length <= n ? t : t.slice(0, n).replace(/\s\S*$/, "").replace(/[,.;:–-]$/, "") + "…"; };
 const pct = p => (p.sale ? Math.round((1 - p.sale / p.price) * 100) : 0);
 const uniq = a => [...new Set(a)];
+const norm = s => String(s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d");
 const CAT_NAME = { skincare: "Skincare", makeup: "Makeup" };
 
 // Phân loại hàng: dòng có variantOf là phân loại của sản phẩm chính. Chỉ sản phẩm chính có thẻ và trang riêng.
@@ -66,6 +70,11 @@ const brandUrl = b => `/thuong-hieu/${slug(b)}/`;
 const activeUrl = a => `/hoat-chat/${slug(a)}/`;
 const BRANDS = uniq(P.map(p => p.brand)).sort((a, b) => a.localeCompare(b, "vi"));
 const ACTIVES = uniq(P.flatMap(p => p.actives)).sort((a, b) => a.localeCompare(b, "vi"));
+
+// chính sách dùng chung cho dữ liệu Google (giao hàng, đổi trả)
+const SHIPPING_LD = { "@type": "OfferShippingDetails", shippingRate: { "@type": "MonetaryAmount", value: 0, currency: "VND" }, shippingDestination: { "@type": "DefinedRegion", addressCountry: "VN" },
+  deliveryTime: { "@type": "ShippingDeliveryTime", handlingTime: { "@type": "QuantitativeValue", minValue: 0, maxValue: 1, unitCode: "DAY" }, transitTime: { "@type": "QuantitativeValue", minValue: 1, maxValue: 5, unitCode: "DAY" } } };
+const RETURN_LD = { "@type": "MerchantReturnPolicy", applicableCountry: "VN", returnPolicyCategory: "https://schema.org/MerchantReturnFiniteReturnWindow", merchantReturnDays: 7, returnMethod: "https://schema.org/ReturnByMail" };
 
 /* ---------- ảnh minh hoạ tạm (thay bằng ảnh thật qua trường "images") ---------- */
 const ACCENT = { pump: "#c79b8e", tube: "#d4a698", bottle: "#a9bcc8", dropper: "#c4a37f", jar: "#d8b3a6", compact: "#caa18d", lipstick: "#b9776b", tint: "#d99a8c" };
@@ -121,8 +130,10 @@ function needTiles(current) {
   return `<div class="needs">${T.needs.map(n => `<a class="need" href="${needUrl(n.name)}"${current === n.name ? ' aria-current="page"' : ""}><b>${esc(n.name)}</b><span>${esc(n.hint)}</span></a>`).join("")}</div>`;
 }
 
-function layout({ title, desc, url, body, ld = [], noindex = false, image, nav }) {
+const OG_DEFAULT = "/og.png";
+function layout({ title, desc, url, body, ld = [], noindex = false, image, nav, type = "website", meta = [], preload, head = "" }) {
   const full = title === SITE.name ? `${SITE.name} – ${SITE.tagline} chính hãng` : `${title} | ${SITE.name}`;
+  const ogImg = image ? absImg(image) : BASE + OG_DEFAULT;
   const navLinks = [
     ["/skincare/", "Skincare"], ["/makeup/", "Makeup"], ["/nhu-cau/", "Theo nhu cầu"], ["/thuong-hieu/", "Thương hiệu"],
     ["/hang-moi-ve/", "Hàng mới về"], ["/ban-chay/", "Bán chạy"], ["/khuyen-mai/", "Khuyến mãi", "sale"], ["/cua-hang/", "Tất cả sản phẩm"], ["/don-hang/", "Tra cứu đơn"],
@@ -136,15 +147,26 @@ function layout({ title, desc, url, body, ld = [], noindex = false, image, nav }
 <meta name="description" content="${esc(desc)}">
 <link rel="canonical" href="${BASE}${url}">
 ${noindex ? '<meta name="robots" content="noindex, follow">' : ""}
-<meta property="og:type" content="website">
+<meta property="og:type" content="${type}">
 <meta property="og:site_name" content="${esc(SITE.name)}">
 <meta property="og:title" content="${esc(full)}">
 <meta property="og:description" content="${esc(desc)}">
 <meta property="og:url" content="${BASE}${url}">
 <meta property="og:locale" content="vi_VN">
-${image ? `<meta property="og:image" content="${esc(image.startsWith("http") ? image : BASE + image)}">` : ""}
+<meta property="og:image" content="${esc(ogImg)}">
+<meta property="og:image:alt" content="${esc(title)}">
+${image ? "" : `<meta property="og:image:width" content="1200">\n<meta property="og:image:height" content="630">`}
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="${esc(full)}">
+<meta name="twitter:description" content="${esc(desc)}">
+<meta name="twitter:image" content="${esc(ogImg)}">
+${meta.map(([k, v]) => `<meta property="${k}" content="${esc(v)}">`).join("\n")}
+${SITE.googleSiteVerification ? `<meta name="google-site-verification" content="${esc(SITE.googleSiteVerification)}">` : ""}
+${preload ? `<link rel="preload" as="image" href="${esc(preload)}" fetchpriority="high">` : ""}
+${head}
 <meta name="theme-color" content="#fbf8f5">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/logo.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant:ital,wght@0,500;0,600;1,500&family=Be+Vietnam+Pro:wght@400;500;600&display=swap">
@@ -196,6 +218,11 @@ ${body}
       ${SITE.instagram ? `<li><a href="${esc(SITE.instagram)}" rel="noopener">Instagram</a></li>` : ""}
     </ul></div>
   </div>
+  <div class="wrap foot-links">
+    <p><b>Danh mục:</b> ${uniq(P.map(p => p.cat + "|" + p.sub)).map(x => x.split("|")).map(([c, sb]) => `<a href="${subUrl(c, sb)}">${esc(sb)}</a>`).join("")}</p>
+    <p><b>Thương hiệu:</b> ${[...BRANDS].sort((a, b) => P.filter(p => p.brand === b).length - P.filter(p => p.brand === a).length).slice(0, 16).map(b => `<a href="${brandUrl(b)}">${esc(b)}</a>`).join("")}</p>
+    <p><b>Theo nhu cầu:</b> ${T.needs.map(n => `<a href="${needUrl(n.name)}">${esc(n.name)}</a>`).join("")}</p>
+  </div>
   <div class="wrap copyline">© ${new Date().getFullYear()} ${esc(SITE.name)}. Mỹ phẩm chính hãng.</div>
 </footer>
 <div class="scrim" id="scrim"></div>
@@ -212,29 +239,41 @@ ${body}
 
 /* ---------- ghi file ---------- */
 const pages = []; // cho sitemap
-function write(url, html, { sitemap = true, priority = 0.6 } = {}) {
+function write(url, html, { sitemap = true, priority = 0.6, images = [], imgTitle = "" } = {}) {
   const file = url.endsWith("/") ? path.join(OUT, url, "index.html") : path.join(OUT, url);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, html);
-  if (sitemap) pages.push({ url, priority });
+  if (sitemap) pages.push({ url, priority, images, imgTitle });
 }
 
+const PER_PAGE = 48;
 function listingPage({ url, title, h1, intro, list, trail, chips = "", extra = "", nav, priority = 0.7, metaDesc }) {
-  const bc = crumbs([HOME, ...trail]);
-  const sorted = [...list].sort((a, b) => b.pop - a.pop);
-  const body = `<div class="wrap">
+  const sorted = [...list].sort((a, b) => b.pop - a.pop || b.id - a.id);
+  const pages = Math.max(1, Math.ceil(sorted.length / PER_PAGE));
+  const pageUrl = n => (n === 1 ? url : `${url}trang-${n}/`);
+  for (let n = 1; n <= pages; n++) {
+    const pu = pageUrl(n), chunk = sorted.slice((n - 1) * PER_PAGE, n * PER_PAGE);
+    const bc = crumbs([HOME, ...trail, ...(n > 1 ? [{ name: `Trang ${n}`, url: pu }] : [])]);
+    const nums = [];
+    for (let k = 1; k <= pages; k++) if (k === 1 || k === pages || Math.abs(k - n) <= 2) nums.push(k); else if (nums[nums.length - 1] !== "…") nums.push("…");
+    const pager = pages > 1 ? `<nav class="pager" aria-label="Trang">${n > 1 ? `<a href="${pageUrl(n - 1)}" rel="prev">‹ Trước</a>` : ""}${nums.map(k => k === "…" ? `<span>…</span>` : k === n ? `<span aria-current="page">${k}</span>` : `<a href="${pageUrl(k)}">${k}</a>`).join("")}${n < pages ? `<a href="${pageUrl(n + 1)}" rel="next">Sau ›</a>` : ""}</nav>` : "";
+    const body = `<div class="wrap">
   ${bc.html}
   <header class="page-head">
-    <h1 class="display">${esc(h1 || title)}</h1>
-    ${intro ? `<p class="lead">${intro}</p>` : ""}
+    <h1 class="display">${esc(h1 || title)}${n > 1 ? ` <small>– trang ${n}</small>` : ""}</h1>
+    ${intro && n === 1 ? `<p class="lead">${intro}</p>` : ""}
   </header>
   ${chips}
-  <p class="result">${sorted.length} sản phẩm</p>
-  ${sorted.length ? grid(sorted) : `<p class="nores">Sản phẩm sẽ sớm cập nhật.</p>`}
-  ${extra}
+  <p class="result">${sorted.length} sản phẩm${pages > 1 ? ` · trang ${n}/${pages}` : ""}</p>
+  ${chunk.length ? grid(chunk) : `<p class="nores">Sản phẩm sẽ sớm cập nhật.</p>`}
+  ${pager}
+  ${n === 1 ? extra : ""}
 </div>`;
-  const ld = [bc.ld, { "@context": "https://schema.org", "@type": "ItemList", itemListElement: sorted.map((p, i) => ({ "@type": "ListItem", position: i + 1, url: BASE + p.url, name: p.name })) }];
-  write(url, layout({ title, desc: metaDesc || `${title} chính hãng tại ${SITE.name}: ${sorted.slice(0, 3).map(p => p.name).join(", ")}${sorted.length > 3 ? "…" : ""}. Chuyển khoản trước miễn phí giao hàng.`, url, body, ld, nav }), { priority });
+    const ld = [bc.ld, { "@context": "https://schema.org", "@type": "ItemList", numberOfItems: sorted.length, itemListElement: chunk.map((p, i) => ({ "@type": "ListItem", position: (n - 1) * PER_PAGE + i + 1, url: BASE + p.url, name: p.name })) }];
+    const d0 = metaDesc || `${title} chính hãng tại ${SITE.name}: ${sorted.slice(0, 3).map(p => p.name).join(", ")}${sorted.length > 3 ? "…" : ""}. Chuyển khoản trước miễn phí giao hàng.`;
+    const head = (n > 1 ? `<link rel="prev" href="${BASE}${pageUrl(n - 1)}">` : "") + (n < pages ? `<link rel="next" href="${BASE}${pageUrl(n + 1)}">` : "");
+    write(pu, layout({ title: n > 1 ? `${title} – trang ${n}` : title, desc: clip(n > 1 ? `Trang ${n}: ${d0}` : d0), url: pu, body, ld, nav, head, image: (chunk[0] || {}).images?.[0] }), { priority: n > 1 ? 0.4 : priority });
+  }
 }
 
 /* ================= TẠO TRANG ================= */
@@ -270,9 +309,13 @@ fs.mkdirSync(OUT, { recursive: true });
     <div class="brands">${BRANDS.map(b => `<a href="${brandUrl(b)}">${esc(b)}</a>`).join("")}</div></section>
 </div>`;
   const ld = [
-    { "@context": "https://schema.org", "@type": "Store", name: SITE.name, url: BASE + "/", description: SITE.description, telephone: SITE.phone, email: SITE.email,
-      address: { "@type": "PostalAddress", addressLocality: SITE.address, addressCountry: "VN" }, currenciesAccepted: "VND", paymentAccepted: "Chuyển khoản, COD" },
-    { "@context": "https://schema.org", "@type": "WebSite", name: SITE.name, url: BASE + "/" },
+    { "@context": "https://schema.org", "@type": ["Organization", "OnlineStore"], "@id": BASE + "/#org", name: SITE.name, url: BASE + "/", logo: BASE + "/logo.png", image: BASE + OG_DEFAULT,
+      description: SITE.description, telephone: SITE.phone, email: SITE.email, address: { "@type": "PostalAddress", addressLocality: SITE.address, addressCountry: "VN" },
+      contactPoint: { "@type": "ContactPoint", telephone: SITE.phone, contactType: "customer service", availableLanguage: "vi" },
+      hasMerchantReturnPolicy: RETURN_LD, currenciesAccepted: "VND", paymentAccepted: "Chuyển khoản, COD",
+      ...(([SITE.facebook, SITE.tiktok, SITE.instagram].filter(Boolean)).length ? { sameAs: [SITE.facebook, SITE.tiktok, SITE.instagram].filter(Boolean) } : {}) },
+    { "@context": "https://schema.org", "@type": "WebSite", "@id": BASE + "/#website", name: SITE.name, url: BASE + "/", inLanguage: "vi-VN", publisher: { "@id": BASE + "/#org" },
+      potentialAction: { "@type": "SearchAction", target: { "@type": "EntryPoint", urlTemplate: BASE + "/cua-hang/?q={search_term_string}" }, "query-input": "required name=search_term_string" } },
   ];
   write("/", layout({ title: SITE.name, desc: SITE.description, url: "/", body, ld }), { priority: 1 });
 }
@@ -366,72 +409,109 @@ listingPage({ url: "/ban-chay/", title: "Sản phẩm bán chạy", intro: "Nh�
 listingPage({ url: "/khuyen-mai/", title: "Khuyến mãi mỹ phẩm", h1: "Đang khuyến mãi", intro: "Giá tốt trong thời gian có hạn, số lượng có hạn.", list: P.filter(p => p.sale), trail: [{ name: "Khuyến mãi", url: "/khuyen-mai/" }], nav: "/khuyen-mai/", priority: 0.8 });
 
 /* Trang sản phẩm */
+const zaloLink = `https://zalo.me/${String(SITE.zalo || "").replace(/\D/g, "")}`;
+const withBrand = p => (norm(p.name).includes(norm(p.brand)) ? p.name : `${p.name} ${p.brand}`);
 for (const p of P) {
   const trail = [{ name: CAT_NAME[p.cat], url: `/${p.cat}/` }, { name: p.sub, url: subUrl(p.cat, p.sub) }, { name: p.name, url: p.url }];
   const bc = crumbs([HOME, ...trail]);
-  const related = P.filter(x => x.id !== p.id).map(x => ({ x, s: (x.sub === p.sub ? 2 : 0) + x.concerns.filter(c => p.concerns.includes(c)).length * 2 + (x.cat === p.cat ? 1 : 0) + x.pop / 20 }))
+  const related = P.filter(x => x.id !== p.id && x.brand !== p.brand).map(x => ({ x, s: (x.sub === p.sub ? 2 : 0) + x.concerns.filter(c => p.concerns.includes(c)).length * 2 + x.actives.filter(c => p.actives.includes(c)).length + (x.cat === p.cat ? 1 : 0) + x.pop / 20 }))
     .sort((a, b) => b.s - a.s).slice(0, 4).map(r => r.x);
+  const sameBrand = P.filter(x => x.id !== p.id && x.brand === p.brand).sort((a, b) => (b.sub === p.sub) - (a.sub === p.sub) || b.pop - a.pop).slice(0, 4);
   const links = (arr, fn) => arr.map(v => `<a href="${fn(v)}">${esc(v)}</a>`).join(", ");
   const many = p.family.length > 1;
   const d = p.family.find(m => m.ownStock && !m.preorder) || p.family.find(m => m.orderable) || p; // phân loại chọn sẵn
   const preRate = Math.round((SITE.order.preorderDepositRate ?? 0.5) * 100);
   // Khách không thấy chữ "order": chỉ báo thời gian giao dự kiến và mức cọc khi chọn COD
   const preNote = m => `Thời gian giao dự kiến: ${esc(m.leadTime || p.leadTime || "7–14 ngày")}.${preRate ? ` Thanh toán khi nhận hàng (COD) cần cọc trước ${preRate}%.` : ""}`;
-  const title = many ? `${p.name} ${p.brand}` : `${p.name} ${p.brand} ${p.vol}`;
-  const desc = `${p.name} ${p.brand} chính hãng, giá ${p.multiPrice ? "từ " : ""}${vnd(p.minPrice)}. ${oneLine(p.desc)}`.slice(0, 158);
+  const full = withBrand(p);
+  const title = `${full}${!many && p.vol ? ` ${p.vol}` : ""} chính hãng`;
+  const saleTxt = p.anySale ? ` giảm ${Math.max(...p.family.map(pct))}%` : "";
+  const desc = clip(`Mua ${full} chính hãng, giá ${p.multiPrice ? "từ " : ""}${vnd(p.minPrice)}${saleTxt}. ${oneLine(p.desc) || `Hàng có sẵn tại ${SITE.name}, chuyển khoản trước miễn phí giao hàng.`}`);
   const priceHtml = m => `<span class="price${m.sale ? " on-sale" : ""}">${vnd(priceOf(m))}</span>${m.sale ? `<s>${vnd(m.price)}</s><span class="badge-off">−${pct(m)}%</span>` : ""}`;
+  const saveHtml = m => (m.sale ? `Tiết kiệm ${vnd(m.price - m.sale)}` : "");
+  const imgs = p.images.length ? p.images : [null];
+  const alt = (i) => `${full}${imgs.length > 1 ? ` – ảnh ${i + 1}` : ""}`;
+  const gallery = `<div class="gallery" data-gallery>
+      <div class="g-main" style="background:${p.tint}">
+        <div class="g-track" id="gTrack">${imgs.map((src, i) => `<div class="g-slide">${src ? `<img src="${esc(src)}" alt="${esc(alt(i))}" width="800" height="1000" decoding="async" ${i === 0 ? 'fetchpriority="high"' : 'loading="lazy"'}>` : art(p.shape)}</div>`).join("")}</div>
+        ${p.anySale || p.isNew ? `<div class="tags">${p.anySale ? `<span class="tag sale">−${Math.max(...p.family.map(pct))}%</span>` : ""}${p.isNew ? `<span class="tag new">Mới về</span>` : ""}</div>` : ""}
+        ${imgs.length > 1 ? `<span class="g-count" id="gCount" aria-hidden="true">1/${imgs.length}</span>` : ""}
+      </div>
+      ${imgs.length > 1 ? `<div class="g-thumbs" role="group" aria-label="Chọn ảnh">${imgs.map((src, i) => `<button type="button" data-gthumb="${i}" aria-label="Xem ảnh ${i + 1}"${i === 0 ? ' aria-current="true"' : ""}><img src="${esc(src)}" alt="" loading="lazy" decoding="async"></button>`).join("")}</div>` : ""}
+    </div>`;
+  const lead = oneLine(p.desc).split(/(?<=[.!?])\s/)[0].slice(0, 220);
+  const sections = [
+    p.desc ? ["Mô tả sản phẩm", rich(p.desc), true] : null,
+    p.howto ? ["Cách dùng", rich(p.howto), !p.desc] : null,
+    p.ingredients ? ["Thành phần", rich(p.ingredients), false] : null,
+    ["Giao hàng & thanh toán", `<ul><li><strong>Chuyển khoản trước: miễn phí giao hàng toàn quốc</strong>, đóng gói ngay khi nhận tiền.</li><li>COD: phí giao ${vnd(SITE.order.shipFee)} + thu hộ ${vnd(SITE.order.codFee)}. Đơn từ ${vnd(SITE.order.codDepositFrom)} cọc trước ${Math.round(SITE.order.codDepositRate * 100)}%.</li><li>Đơn đặt trong ngày (trước 16:00) được đóng gói ngay, nhận hàng sau 1–3 ngày (tỉnh xa 3–5 ngày).</li><li>Đổi trả trong 7 ngày nếu hàng lỗi, sai mẫu hoặc hư hỏng khi vận chuyển. <a href="/chinh-sach/doi-tra/">Xem chính sách đổi trả</a></li></ul>`, false],
+  ].filter(Boolean);
   const body = `<div class="wrap">
   ${bc.html}
-  <div class="pdp">
-    <div class="shot" style="background:${p.tint}">${picture(p, true)}
-      ${p.sale || p.isNew ? `<div class="tags">${p.sale ? `<span class="tag sale">−${pct(p)}%</span>` : ""}${p.isNew ? `<span class="tag new">Mới về</span>` : ""}</div>` : ""}</div>
-    <div>
+  <div class="pdp" data-pid="${p.id}">
+    ${gallery}
+    <div class="pd-info">
       <a class="brand" href="${brandUrl(p.brand)}">${esc(p.brand)}</a>
       <h1 class="display">${esc(p.name)}</h1>
+      ${lead ? `<p class="pd-lead">${esc(lead)}</p>` : ""}
       <div class="prices" id="pdPrice">${priceHtml(d)}</div>
-      <div class="prose lead-desc">${rich(p.desc)}</div>
+      <p class="pd-save" id="pdSave"${d.sale ? "" : " hidden"}>${saveHtml(d)}</p>
       ${many ? `<div class="variants" data-variants="${p.id}" role="group" aria-label="Chọn phân loại">
         <p class="eyebrow">Phân loại</p>
         <div class="vchips">${p.family.map(m => `<button type="button" class="vchip" data-vid="${m.id}" aria-pressed="${m.id === d.id}"${m.orderable ? "" : " disabled"}><b>${esc(m.vol || "Mặc định")}</b><small>${m.orderable ? vnd(priceOf(m)) : "Hết hàng"}</small></button>`).join("")}</div>
       </div>` : ""}
       <p class="note pre" id="pdPre"${d.preorder ? "" : " hidden"}>${preNote(d)}</p>
-      ${p.inStock ? `<div class="buy" data-buy="${p.id}">
+      ${p.inStock ? `<div class="buy" data-buy="${p.id}" id="pdBuy">
         <div class="qty"><button type="button" data-step="-1" aria-label="Giảm số lượng">−</button><output id="pq">1</output><button type="button" data-step="1" aria-label="Tăng số lượng">+</button></div>
         <button class="btn dark" type="button" data-add-qty="${d.id}">Thêm vào giỏ</button>
         <button class="btn" type="button" data-buy-now="${d.id}">Mua ngay</button>
       </div>` : `<p class="note">Tạm hết hàng. Nhắn Zalo ${esc(SITE.zalo)} để được báo khi có hàng.</p>`}
-      <p class="pay-note"><strong>Chuyển khoản trước: miễn phí giao hàng.</strong> COD: ship ${vnd(SITE.order.shipFee)} + phí thu hộ ${vnd(SITE.order.codFee)}.</p>
+      <ul class="trust">
+        <li><b>Chính hãng 100%</b>Hoàn tiền nếu không chính hãng</li>
+        <li><b>Miễn phí giao hàng</b>Khi chuyển khoản trước</li>
+        <li><b>Đổi trả 7 ngày</b>Hàng lỗi, sai mẫu</li>
+        <li><b>Giao 1–3 ngày</b>Đóng gói trong ngày</li>
+      </ul>
+      <div class="pd-ask">
+        <a class="btn ghost sm" href="${zaloLink}" target="_blank" rel="noopener">Hỏi Luna qua Zalo</a>
+        <button type="button" class="btn ghost sm" data-share="${esc(BASE + p.url)}" data-share-title="${esc(full)}">Chia sẻ</button>
+      </div>
       <dl class="facts">
         <dt>Thương hiệu</dt><dd><a href="${brandUrl(p.brand)}">${esc(p.brand)}</a></dd>
-        <dt>Xuất xứ</dt><dd>${esc(p.origin)}</dd>
-        <dt>${many ? "Phân loại" : "Dung tích"}</dt><dd id="pdVol">${esc(many ? p.family.map(m => m.vol).filter(Boolean).join(", ") : p.vol)}</dd>
+        ${p.origin ? `<dt>Xuất xứ</dt><dd>${esc(p.origin)}</dd>` : ""}
+        ${(many ? p.family.some(m => m.vol) : p.vol) ? `<dt>${many ? "Phân loại" : "Dung tích"}</dt><dd id="pdVol">${esc(many ? p.family.map(m => m.vol).filter(Boolean).join(", ") : p.vol)}</dd>` : ""}
         <dt>Danh mục</dt><dd><a href="${subUrl(p.cat, p.sub)}">${esc(p.sub)}</a></dd>
         ${p.skin.length ? `<dt>Loại da</dt><dd>${esc(p.skin.join(", "))}</dd>` : ""}
         ${p.actives.length ? `<dt>Hoạt chất</dt><dd>${links(p.actives, activeUrl)}</dd>` : ""}
         ${p.concerns.length ? `<dt>Phù hợp</dt><dd>${links(p.concerns, needUrl)}</dd>` : ""}
       </dl>
-      <div class="prose">
-        ${p.howto ? `<h2>Cách dùng</h2>${rich(p.howto)}` : ""}
-        ${p.ingredients ? `<h2>Thành phần</h2>${rich(p.ingredients)}` : ""}
-      </div>
+      <div class="pd-sections">${sections.map(([h, html, open]) => `<details class="pd-sec"${open ? " open" : ""}><summary><h2>${h}</h2></summary><div class="prose">${html}</div></details>`).join("")}</div>
     </div>
   </div>
-  <section class="section"><div class="sec-head"><h2>Có thể bạn cũng thích</h2></div>${grid(related, "row4")}</section>
-</div>`;
+  ${sameBrand.length ? `<section class="section"><div class="sec-head"><h2>Cùng thương hiệu ${esc(p.brand)}</h2><a href="${brandUrl(p.brand)}">Xem tất cả</a></div>${grid(sameBrand, "row4")}</section>` : ""}
+  ${related.length ? `<section class="section"><div class="sec-head"><h2>Có thể bạn cũng thích</h2><a href="${subUrl(p.cat, p.sub)}">Xem ${esc(p.sub.toLowerCase())}</a></div>${grid(related, "row4")}</section>` : ""}
+  <section class="section" id="seen" hidden><div class="sec-head"><h2>Bạn đã xem gần đây</h2></div><div class="seen" id="seenList"></div></section>
+</div>
+${p.inStock ? `<div class="sticky-buy" id="stickyBuy" hidden aria-hidden="true">
+  <div class="wrap sb-in">
+    <div class="sb-name"><b>${esc(p.name)}</b><span id="sbPrice">${vnd(priceOf(d))}</span></div>
+    <button class="btn" type="button" data-add-qty="${d.id}" tabindex="-1">Thêm vào giỏ</button>
+  </div>
+</div>` : ""}`;
+  const offer = m => ({ "@type": "Offer", url: BASE + p.url, priceCurrency: "VND", price: priceOf(m), itemCondition: "https://schema.org/NewCondition",
+    availability: m.preorder ? "https://schema.org/PreOrder" : m.ownStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+    seller: { "@type": "Organization", name: SITE.name }, shippingDetails: SHIPPING_LD, hasMerchantReturnPolicy: RETURN_LD, ...(many && m.vol ? { name: m.vol, sku: `LUNA-${m.id}` } : {}) });
   const product = {
-    "@context": "https://schema.org", "@type": "Product", name: `${p.name} ${p.brand}`, description: oneLine(p.desc), sku: `LUNA-${p.id}`,
-    brand: { "@type": "Brand", name: p.brand }, category: `${CAT_NAME[p.cat]} > ${p.sub}`, countryOfOrigin: p.origin,
-    ...(p.images.length ? { image: p.images.map(i => (i.startsWith("http") ? i : BASE + i)) } : {}),
-    offers: (() => {
-      const offer = m => ({ "@type": "Offer", url: BASE + p.url, priceCurrency: "VND", price: priceOf(m), itemCondition: "https://schema.org/NewCondition",
-        availability: m.preorder ? "https://schema.org/PreOrder" : m.ownStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", seller: { "@type": "Organization", name: SITE.name }, ...(many && m.vol ? { name: m.vol } : {}) });
-      if (!many) return offer(p);
-      const prices = p.family.map(priceOf);
-      return { "@type": "AggregateOffer", priceCurrency: "VND", lowPrice: Math.min(...prices), highPrice: Math.max(...prices), offerCount: p.family.length,
-        availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", offers: p.family.map(offer) };
-    })(),
+    "@context": "https://schema.org", "@type": "Product", "@id": BASE + p.url + "#product", name: full + (!many && p.vol ? ` ${p.vol}` : ""), url: BASE + p.url,
+    description: oneLine(p.desc) || `${full} chính hãng tại ${SITE.name}.`, sku: `LUNA-${p.id}`,
+    brand: { "@type": "Brand", name: p.brand }, category: `${CAT_NAME[p.cat]} > ${p.sub}`, ...(p.origin ? { countryOfOrigin: p.origin } : {}),
+    ...(p.images.length ? { image: p.images.map(absImg) } : {}),
+    ...(p.actives.length ? { keywords: [p.sub, ...p.actives, ...p.concerns].join(", ") } : {}),
+    offers: many ? { "@type": "AggregateOffer", priceCurrency: "VND", lowPrice: Math.min(...p.family.map(priceOf)), highPrice: Math.max(...p.family.map(priceOf)), offerCount: p.family.length,
+      availability: p.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock", offers: p.family.map(offer) } : offer(p),
   };
-  write(p.url, layout({ title, desc, url: p.url, body, ld: [bc.ld, product], image: p.images[0] }), { priority: 0.9 });
+  const meta = [["product:price:amount", priceOf(d)], ["product:price:currency", "VND"], ["product:availability", p.inStock ? "in stock" : "out of stock"], ["product:brand", p.brand], ["product:condition", "new"]];
+  write(p.url, layout({ title, desc, url: p.url, body, ld: [bc.ld, product], image: p.images[0], type: "product", meta, preload: p.images[0] }), { priority: 0.9, images: p.images.map(absImg).slice(0, 5), imgTitle: full });
 }
 
 /* Tra cứu đơn hàng (không đưa lên Google) */
@@ -489,21 +569,38 @@ write("/404.html", layout({ title: "Không tìm thấy trang", desc: "Trang khô
 /* Dữ liệu cho trình duyệt (giỏ hàng, bộ lọc, thanh toán) */
 fs.mkdirSync(path.join(OUT, "assets"), { recursive: true });
 const pub = ALL.filter(p => p.url).map(p => ({ id: p.id, cat: p.cat, sub: p.sub, brand: p.brand, origin: p.origin, name: p.name, vol: p.vol, price: p.price, sale: p.sale || 0,
-  isNew: !!p.isNew, pop: p.pop, actives: p.actives, skin: p.skin, concerns: p.concerns, url: p.url, img: p.images[0] || "", shape: p.shape, tint: p.tint, inStock: p.ownStock !== false, preorder: !!p.preorder, lead: p.leadTime || "",
+  isNew: !!p.isNew, pop: p.pop, actives: p.actives, skin: p.skin, concerns: p.concerns, url: p.url, img: p.images[0] || "", shape: p.shape, tint: p.tint, ok: p.ownStock !== false || !!p.preorder, ship: p.preorder ? p.leadTime || "7–14 ngày" : "",
   parent: P.includes(p) ? 0 : p.variantOf, pos: p.position || 0 }));
-const cfg = { ...SITE.order, zalo: SITE.zalo, shopName: SITE.name, carriers: SITE.carriers || [], supabase: SB.url && SB.anonKey ? SB : null };
+const { preorderDepositRate: lateDepositRate, ...orderCfg } = SITE.order;
+const cfg = { ...orderCfg, lateDepositRate, zalo: SITE.zalo, shopName: SITE.name, carriers: SITE.carriers || [], supabase: SB.url && SB.anonKey ? SB : null };
 fs.writeFileSync(path.join(OUT, "assets/data.js"),
   `window.LUNA=${JSON.stringify({ products: pub, cfg, needs: T.needs.map(n => ({ name: n.name, hint: n.hint })), art: ACCENT })};`);
 for (const f of fs.readdirSync(path.join(ROOT, "assets"))) fs.copyFileSync(path.join(ROOT, "assets", f), path.join(OUT, "assets", f));
 if (fs.existsSync(path.join(ROOT, "public"))) fs.cpSync(path.join(ROOT, "public"), OUT, { recursive: true });
 
-/* sitemap + robots */
+/* sitemap (kèm ảnh sản phẩm) + robots */
+const xml = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 fs.writeFileSync(path.join(OUT, "sitemap.xml"), `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-${pages.map(p => `  <url><loc>${BASE}${p.url}</loc><lastmod>${TODAY}</lastmod><priority>${p.priority.toFixed(1)}</priority></url>`).join("\n")}
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+${pages.map(p => `  <url><loc>${xml(BASE + p.url)}</loc><lastmod>${TODAY}</lastmod><priority>${p.priority.toFixed(1)}</priority>${p.images.map(i => `<image:image><image:loc>${xml(i)}</image:loc></image:image>`).join("")}</url>`).join("\n")}
 </urlset>
 `);
-fs.writeFileSync(path.join(OUT, "robots.txt"), `User-agent: *\nAllow: /\nDisallow: /thanh-toan/\nDisallow: /admin/\n\nSitemap: ${BASE}/sitemap.xml\n`);
+fs.writeFileSync(path.join(OUT, "robots.txt"), `User-agent: *\nAllow: /\nDisallow: /thanh-toan/\nDisallow: /don-hang/\nDisallow: /admin/\nDisallow: /api/\nDisallow: /*?*q=\n\nSitemap: ${BASE}/sitemap.xml\n`);
+
+/* Nguồn dữ liệu Google Merchant Center (hiện sản phẩm miễn phí trên Google Mua sắm) */
+{
+  const items = P.flatMap(p => p.family.map(m => {
+    const img = (m.images && m.images[0]) || p.images[0];
+    if (!img) return "";
+    const g = (k, v) => (v === "" || v === undefined || v === null ? "" : `<g:${k}>${xml(v)}</g:${k}>`);
+    return `<item>${g("id", `LUNA-${m.id}`)}${p.family.length > 1 ? g("item_group_id", `LUNA-${p.id}`) : ""}${g("title", clip(`${withBrand(p)}${m.vol ? ` ${m.vol}` : ""}`, 150))}${g("description", clip(oneLine(p.desc) || `${withBrand(p)} chính hãng tại ${SITE.name}.`, 4900))}${g("link", BASE + p.url)}${g("image_link", absImg(img))}${p.images.slice(1, 6).map(i => g("additional_image_link", absImg(i))).join("")}${g("availability", m.preorder ? "preorder" : m.ownStock ? "in_stock" : "out_of_stock")}${g("price", `${m.price} VND`)}${m.sale ? g("sale_price", `${m.sale} VND`) : ""}${g("brand", p.brand)}${g("condition", "new")}${g("identifier_exists", "no")}${g("product_type", `${CAT_NAME[p.cat]} > ${p.sub}`)}${g("google_product_category", p.cat === "makeup" ? "Health & Beauty > Personal Care > Cosmetics > Makeup" : "Health & Beauty > Personal Care > Cosmetics > Skin Care")}${m.vol && p.family.length > 1 ? g("size", m.vol) : ""}<g:shipping><g:country>VN</g:country><g:price>0 VND</g:price></g:shipping></item>`;
+  })).filter(Boolean);
+  fs.writeFileSync(path.join(OUT, "google-merchant.xml"), `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:g="http://base.google.com/ns/1.0"><channel><title>${xml(SITE.name)}</title><link>${xml(BASE + "/")}</link><description>${xml(SITE.description)}</description>
+${items.join("\n")}
+</channel></rss>
+`);
+}
 
 /* Trang admin */
 fs.mkdirSync(path.join(OUT, "admin"), { recursive: true });

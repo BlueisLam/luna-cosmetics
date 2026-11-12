@@ -64,12 +64,48 @@
 
     <section id="v-products" class="view" hidden>
       <div class="a-toolbar">
-        <input id="pSearch" type="search" placeholder="Tìm tên, thương hiệu…" aria-label="Tìm sản phẩm">
+        <input id="pSearch" type="search" placeholder="Tìm tên, thương hiệu, hoạt chất, mã…" aria-label="Tìm sản phẩm">
         <button class="btn ghost" type="button" id="pImport">Nhập từ web hãng</button>
         <button class="btn" type="button" id="pNew">Thêm sản phẩm</button>
       </div>
+      <div class="p-filters">
+        <label class="sr" for="pBrand">Thương hiệu</label><select id="pBrand"></select>
+        <label class="sr" for="pSub">Danh mục</label><select id="pSub"></select>
+        <label class="sr" for="pSort">Sắp xếp</label>
+        <select id="pSort">
+          <option value="new">Mới thêm trước</option><option value="old">Cũ trước</option><option value="name">Tên A → Z</option>
+          <option value="asc">Giá thấp → cao</option><option value="desc">Giá cao → thấp</option><option value="pop">Bán chạy</option><option value="disc">Giảm nhiều nhất</option>
+        </select>
+        <span class="p-tools">
+          <button class="linkish" type="button" id="pCsv">Xuất file Excel (CSV)</button>
+          <label class="linkish" for="pCsvIn">Cập nhật giá bằng file CSV<input type="file" id="pCsvIn" accept=".csv,text/csv" hidden></label>
+        </span>
+      </div>
+      <div class="chips" id="pStatus"></div>
       <p class="result" id="pCount"></p>
+      <div class="bulk" id="pBulk" hidden>
+        <div class="bulk-top">
+          <strong id="pSelN"></strong>
+          <button class="linkish" type="button" id="pSelAll"></button>
+          <button class="linkish" type="button" id="pSelNone">Bỏ chọn</button>
+        </div>
+        <div class="bulk-acts">
+          <button class="btn ghost sm" type="button" data-bulk="show">Hiện</button>
+          <button class="btn ghost sm" type="button" data-bulk="hide">Ẩn</button>
+          <button class="btn ghost sm" type="button" data-bulk="new">Gắn Mới về</button>
+          <button class="btn ghost sm" type="button" data-bulk="unnew">Bỏ Mới về</button>
+          <button class="btn ghost sm" type="button" data-bulk="disc">Giảm giá…</button>
+          <button class="btn ghost sm" type="button" data-bulk="undisc">Bỏ giảm giá</button>
+          <button class="btn ghost sm" type="button" data-bulk="price">Đổi giá gốc…</button>
+          <button class="btn ghost sm" type="button" data-bulk="cat">Đổi danh mục…</button>
+          <button class="btn ghost sm" type="button" data-bulk="brand">Đổi thương hiệu…</button>
+          <button class="btn ghost sm danger-t" type="button" data-bulk="del">Xoá…</button>
+        </div>
+        <div id="pBulkForm"></div>
+      </div>
+      <div id="pCsvBox"></div>
       <div id="pList" class="p-list"></div>
+      <nav class="pager" id="pPager" aria-label="Trang"></nav>
     </section>
 
     <section id="v-stock" class="view" hidden>

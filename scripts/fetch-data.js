@@ -14,8 +14,9 @@ if (!url || !key) {
   process.exit(0);
 }
 
-const get = async p => {
+const get = async (p, soft) => {
   const r = await fetch(`${url}/rest/v1/${p}`, { headers: { apikey: key, ...(key.startsWith("eyJ") ? { Authorization: `Bearer ${key}` } : {}) } });
+  if (soft && !r.ok) return null;
   if (r.status === 404) {
     // Chưa chạy supabase/schema.sql: vẫn build bằng dữ liệu mẫu để web không bị sập
     console.log("• Supabase chưa có bảng (chưa chạy schema.sql) → dùng data/products.json");
@@ -26,10 +27,11 @@ const get = async p => {
 };
 
 (async () => {
-  const [rows, settings] = await Promise.all([
-    get("products?visible=eq.true&select=*&order=id"),
-    get("shop_settings?id=eq.1&select=*"),
-  ]);
+  // Đọc view "catalog" (chỉ cột công khai). Supabase chưa chạy giai đoạn 7 thì đọc bảng products như cũ.
+  let rows = await get("catalog?select=*&order=id", true);
+  if (rows) rows = rows.map(r => ({ ...r, in_stock: r.available && !r.ship_time, preorder: !!r.ship_time, lead_time: r.ship_time }));
+  else rows = await get("products?visible=eq.true&select=*&order=id");
+  const settings = await get("shop_settings?id=eq.1&select=*");
   if (!rows.length) {
     console.log("• Supabase chưa có sản phẩm → dùng data/products.json (hãy chạy supabase/seed.sql)");
     process.exit(0);

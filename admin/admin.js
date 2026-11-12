@@ -6,7 +6,33 @@
   const vnd = n => (Number(n) || 0).toLocaleString("vi-VN").replace(/,/g, ".") + "đ";
   const norm = s => (s || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/đ/g, "d");
   const slug = s => norm(s).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50) || "anh";
+  // giống slug trong build.js để link sản phẩm đúng
+  const pslug = s => String(s).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, "d").replace(/&/g, " va ").replace(/%/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const normPhone = s => (s || "").replace(/[\s.\-]/g, "").replace(/^\+84/, "0");
+  // Giảm giá: nhập theo % / số tiền / giá sau giảm → luôn lưu thành "giá sale"
+  const r1000 = n => Math.round(n / 1000) * 1000;
+  const DMODES = [["pct", "Giảm theo %", "%"], ["amount", "Giảm số tiền", "đ"], ["price", "Nhập giá sau giảm", "đ"]];
+  const dUnit = m => (DMODES.find(x => x[0] === m) || DMODES[0])[2];
+  const saleFrom = (price, mode, val) => {
+    const v = Number(val), pr = Number(price);
+    if (val === "" || val === null || val === undefined || !(v > 0)) return null;
+    return mode === "pct" ? r1000(pr * (1 - v / 100)) : mode === "amount" ? Math.round(pr - v) : Math.round(v);
+  };
+  const valFrom = (price, sale, mode) => (!sale || !price ? "" : mode === "pct" ? Math.round((1 - sale / price) * 1000) / 10 : mode === "amount" ? price - sale : sale);
+  // lỗi giảm giá (chuỗi rỗng = hợp lệ)
+  const saleErr = (price, mode, val) => {
+    if (val === "" || val === null || val === undefined) return "";
+    const v = Number(val), sale = saleFrom(price, mode, val);
+    if (mode === "pct" && !(v > 0 && v < 100)) return "phần trăm giảm phải từ 1 đến 99";
+    if (!(sale > 0 && sale < Number(price))) return mode === "pct" ? "mức giảm quá nhỏ" : mode === "amount" ? "số tiền giảm phải nhỏ hơn giá gốc" : "giá sau giảm phải nhỏ hơn giá gốc";
+    return "";
+  };
+  const dPreview = (price, mode, val) => {
+    const sale = saleFrom(price, mode, val);
+    if (!sale || !(price > 0) || saleErr(price, mode, val)) return "";
+    return `Giá bán ${vnd(sale)} · giảm ${Math.round((1 - sale / price) * 100)}% (−${vnd(price - sale)})`;
+  };
+  let dMode = (() => { try { return localStorage.getItem("luna-admin-dmode") || "pct"; } catch (e) { return "pct"; } })();
   const fmtTime = t => new Date(t).toLocaleString("vi-VN", { timeZone: "Asia/Ho_Chi_Minh", hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" });
 
   if (!CFG.supabase || !window.supabase) { $("setup").hidden = false; return; }
@@ -150,21 +176,60 @@
   }
   const rootOf = p => (p && p.variant_of ? products.find(x => x.id === p.variant_of) || p : p);
   const kidsOf = id => products.filter(k => k.variant_of === id).sort((a, b) => (a.position || 0) - (b.position || 0) || a.id - b.id);
-  const priceTxt = p => (p.sale ? `<s class="muted">${vnd(p.price)}</s> <span class="on-sale">${vnd(p.sale)}</span>` : vnd(p.price));
-  function renderProducts() {
-    const q = norm(pQuery);
+  const priceTxt = p => (p.sale ? `<s class="muted">${vnd(p.price)}</s> <span class="on-sale">${vnd(p.sale)}</span> <span class="st-chip sale">−${Math.round((1 - p.sale / p.price) * 100)}%</span>` : vnd(p.price));
+  /* ---- danh sách sản phẩm: lọc, sắp xếp, phân trang, chọn nhiều ---- */
+  const PER = 50;
+  const pF = (() => { try { return { brand: "", sub: "", status: "all", sort: "new", ...JSON.parse(localStorage.getItem("luna-admin-pf") || "{}"), page: 1 }; } catch (e) { return { brand: "", sub: "", status: "all", sort: "new", page: 1 }; } })();
+  const pSel = new Set();
+  const famOf = p => [p, ...kidsOf(p.id)];
+  const minOf = p => Math.min(...famOf(p).map(m => m.sale || m.price));
+  const discOf = p => Math.max(0, ...famOf(p).map(m => (m.sale ? 1 - m.sale / m.price : 0)));
+  const P_STATUS = [
+    ["all", "Tất cả", () => true],
+    ["visible", "Đang hiện", p => p.visible],
+    ["hidden", "Đang ẩn", p => !p.visible],
+    ["out", "Hết hàng", p => !famOf(p).some(m => m.in_stock || m.preorder)],
+    ["sale", "Đang giảm giá", p => famOf(p).some(m => m.sale)],
+    ["new", "Mới về", p => p.is_new],
+    ["order", "Hàng order", p => famOf(p).some(m => m.preorder)],
+    ["noimg", "Thiếu ảnh", p => !(p.images || []).length],
+    ["nodesc", "Thiếu mô tả", p => !(p.descr || "").trim()],
+  ];
+  function pFiltered() {
+    const q = norm(pQuery).trim();
     const roots = products.filter(p => rootOf(p) === p);
-    const match = p => !q || norm(`${p.name} ${p.brand} ${p.sub} ${p.vol} ${(p.actives || []).join(" ")}`).includes(q);
-    const list = roots.filter(p => match(p) || kidsOf(p.id).some(match));
-    $("pCount").textContent = `${list.length} / ${roots.length} sản phẩm · ${products.length - roots.length} phân loại thêm · ${products.filter(p => !p.in_stock && !p.preorder).length} hết hàng · ${products.filter(p => p.preorder).length} hàng order · ${roots.filter(p => !p.visible).length} đang ẩn`;
+    const words = q.split(/\s+/).filter(Boolean);
+    const hay = p => norm(`${p.id} ${p.name} ${p.brand} ${p.sub} ${p.vol} ${p.origin} ${(p.actives || []).join(" ")} ${kidsOf(p.id).map(k => k.vol).join(" ")}`);
+    const st = (P_STATUS.find(x => x[0] === pF.status) || P_STATUS[0])[2];
+    const list = roots.filter(p => (!pF.brand || p.brand === pF.brand) && (!pF.sub || p.sub === pF.sub) && (!words.length || words.every(w => hay(p).includes(w))));
+    return { roots, base: list, list: list.filter(st) };
+  }
+  function renderProducts() {
+    const { roots, base, list } = pFiltered();
+    const by = { new: (a, b) => b.id - a.id, old: (a, b) => a.id - b.id, name: (a, b) => a.name.localeCompare(b.name, "vi"), asc: (a, b) => minOf(a) - minOf(b), desc: (a, b) => minOf(b) - minOf(a), pop: (a, b) => (b.pop || 0) - (a.pop || 0) || b.id - a.id, disc: (a, b) => discOf(b) - discOf(a) };
+    list.sort(by[pF.sort] || by.new);
+    // bộ lọc
+    const brands = [...new Set(roots.map(p => p.brand))].sort((a, b) => a.localeCompare(b, "vi"));
+    const subs = [...new Set(roots.map(p => p.sub))].sort((a, b) => a.localeCompare(b, "vi"));
+    $("pBrand").innerHTML = `<option value="">Mọi thương hiệu (${brands.length})</option>` + brands.map(b => `<option${b === pF.brand ? " selected" : ""}>${esc(b)}</option>`).join("");
+    $("pSub").innerHTML = `<option value="">Mọi danh mục (${subs.length})</option>` + subs.map(b => `<option${b === pF.sub ? " selected" : ""}>${esc(b)}</option>`).join("");
+    $("pSort").value = pF.sort;
+    $("pStatus").innerHTML = P_STATUS.map(([k, l, f]) => { const n = base.filter(f).length; return k !== "all" && !n && pF.status !== k ? "" : `<button type="button" class="chip" data-pst="${k}" aria-pressed="${pF.status === k}">${l}<b>${n}</b></button>`; }).join("");
+    const pages = Math.max(1, Math.ceil(list.length / PER));
+    pF.page = Math.min(Math.max(1, pF.page), pages);
+    const view = list.slice((pF.page - 1) * PER, pF.page * PER);
+    const filtered = !!(pQuery || pF.brand || pF.sub || pF.status !== "all");
+    $("pCount").textContent = `${filtered ? `${list.length} khớp bộ lọc / ` : ""}${roots.length} sản phẩm · ${products.length - roots.length} phân loại thêm${pages > 1 ? ` · trang ${pF.page}/${pages}` : ""}`;
     const stockBtn = p => `<button type="button" class="tg stock" data-tg="in_stock" data-pid="${p.id}" aria-pressed="${p.in_stock || !!p.preorder}">${p.preorder ? "Hàng order" : p.in_stock ? "Còn hàng" : "Hết hàng"}</button>`;
-    $("pList").innerHTML = list.length ? list.map(p => {
+    $("pList").innerHTML = view.length ? view.map(p => {
       const kids = kidsOf(p.id);
-      return `<div class="p-row${p.visible ? "" : " off"}">
+      const warn = [!(p.images || []).length ? "Thiếu ảnh" : "", !(p.descr || "").trim() ? "Thiếu mô tả" : ""].filter(Boolean);
+      return `<div class="p-row sel${p.visible ? "" : " off"}${pSel.has(p.id) ? " picked" : ""}">
+      <input type="checkbox" class="p-ck" data-psel="${p.id}" aria-label="Chọn ${esc(p.name)}"${pSel.has(p.id) ? " checked" : ""}>
       <div class="p-thumb" style="background:${esc(p.tint)}">${p.images && p.images[0] ? `<img src="${esc(p.images[0])}" alt="" loading="lazy">` : ""}</div>
       <div>
         <div class="p-name">${esc(p.name)}</div>
-        <div class="p-sub">${esc(p.brand)} · ${esc(p.sub)} · ${esc(p.vol)}${kids.length ? ` · <b>${kids.length + 1} phân loại</b>` : ""}</div>
+        <div class="p-sub">#${p.id} · ${esc(p.brand)} · ${esc(p.sub)}${p.vol ? ` · ${esc(p.vol)}` : ""}${kids.length ? ` · <b>${kids.length + 1} phân loại</b>` : ""}${warn.map(w => ` <span class="st-chip warn">${w}</span>`).join("")}</div>
         <div class="p-flags">
           <button type="button" class="tg" data-tg="visible" data-pid="${p.id}" aria-pressed="${p.visible}">${p.visible ? "Đang hiện" : "Đang ẩn"}</button>
           ${stockBtn(p)}
@@ -174,12 +239,179 @@
       <div class="p-right">
         <span class="price">${priceTxt(p)}</span>
         <button type="button" class="btn ghost sm" data-edit="${p.id}">Sửa</button>
-      </div></div>${kids.map(k => `<div class="p-row child${p.visible ? "" : " off"}">
-      <div class="p-thumb" aria-hidden="true">↳</div>
+      </div></div>${kids.map(k => `<div class="p-row sel child${p.visible ? "" : " off"}">
+      <span></span><div class="p-thumb" aria-hidden="true">↳</div>
       <div><div class="p-name">${esc(k.vol || "Phân loại")}</div><div class="p-flags">${stockBtn(k)}</div></div>
       <div class="p-right"><span class="price">${priceTxt(k)}</span><button type="button" class="btn ghost sm" data-edit="${p.id}">Sửa</button></div></div>`).join("")}`;
-    }).join("") : `<p class="loading">${products.length ? "Không có sản phẩm khớp." : "Chưa có sản phẩm. Bấm “Thêm sản phẩm” hoặc chạy supabase/seed.sql."}</p>`;
+    }).join("") : `<p class="loading">${products.length ? "Không có sản phẩm khớp bộ lọc." : "Chưa có sản phẩm. Bấm “Thêm sản phẩm” hoặc “Nhập từ web hãng”."}</p>`;
+    // phân trang
+    const nums = [];
+    for (let n = 1; n <= pages; n++) if (n === 1 || n === pages || Math.abs(n - pF.page) <= 2) nums.push(n); else if (nums[nums.length - 1] !== "…") nums.push("…");
+    $("pPager").innerHTML = pages > 1 ? `<button type="button" class="pg" data-pg="${pF.page - 1}"${pF.page === 1 ? " disabled" : ""}>‹ Trước</button>${nums.map(n => n === "…" ? `<span>…</span>` : `<button type="button" class="pg" data-pg="${n}"${n === pF.page ? ' aria-current="page"' : ""}>${n}</button>`).join("")}<button type="button" class="pg" data-pg="${pF.page + 1}"${pF.page === pages ? " disabled" : ""}>Sau ›</button>` : "";
+    // thanh chọn nhiều
+    [...pSel].forEach(id => { if (!products.some(p => p.id === id)) pSel.delete(id); });
+    $("pBulk").hidden = !pSel.size;
+    $("pSelN").textContent = `Đã chọn ${pSel.size} sản phẩm`;
+    const allIn = list.length && list.every(p => pSel.has(p.id));
+    $("pSelAll").textContent = allIn ? "" : `Chọn tất cả ${list.length} sản phẩm đang lọc`;
+    $("pSelAll").hidden = allIn;
+    try { localStorage.setItem("luna-admin-pf", JSON.stringify({ brand: pF.brand, sub: pF.sub, status: pF.status, sort: pF.sort })); } catch (e) {}
   }
+
+  /* ---- sửa hàng loạt ---- */
+  let bulkKind = "";
+  const selRoots = () => products.filter(p => pSel.has(p.id) && rootOf(p) === p);
+  const selFamily = () => selRoots().flatMap(famOf);
+  function openBulk(kind) {
+    bulkKind = kind;
+    const n = pSel.size, box = $("pBulkForm");
+    const subs = [...new Set([...(CFG.taxonomy?.subs || []), ...products.map(x => x.sub)])];
+    const brands = [...new Set(products.map(x => x.brand))];
+    const forms = {
+      disc: `<p>Giảm giá cho ${n} sản phẩm và mọi phân loại của chúng.</p>
+        <div class="disc"><label class="sr" for="bMode">Cách giảm</label><select id="bMode"><option value="pct">Giảm theo %</option><option value="amount">Giảm số tiền (đ)</option></select>
+        <label class="sr" for="bVal">Mức giảm</label><span class="dval"><input id="bVal" type="number" min="0" step="any" placeholder="Ví dụ 15"><b id="bUnit">%</b></span></div>
+        <label class="ckl"><input type="checkbox" id="bFromSale"> Tính trên giá đang bán (nếu đang có giảm giá) thay vì giá gốc</label>`,
+      price: `<p>Tăng / giảm <strong>giá gốc</strong> của ${n} sản phẩm (và phân loại) theo %. Giá sale đang có đổi theo cùng tỉ lệ. Làm tròn tới 1.000đ.</p>
+        <div class="disc"><label class="sr" for="bVal">Phần trăm</label><span class="dval"><input id="bVal" type="number" step="any" placeholder="10 = tăng 10%, −5 = giảm 5%"><b>%</b></span></div>`,
+      cat: `<p>Đổi danh mục cho ${n} sản phẩm.</p><div class="two">
+        <label class="f" for="bCat">Nhóm<select id="bCat"><option value="skincare">Skincare</option><option value="makeup">Makeup</option></select></label>
+        <label class="f" for="bSub">Danh mục<input id="bSub" list="bSubs" placeholder="Serum, Toner…"></label></div>
+        <datalist id="bSubs">${subs.map(x => `<option value="${esc(x)}">`).join("")}</datalist>`,
+      brand: `<p>Đổi thương hiệu cho ${n} sản phẩm.</p><label class="f" for="bBrand">Thương hiệu<input id="bBrand" list="bBrands"></label><datalist id="bBrands">${brands.map(x => `<option value="${esc(x)}">`).join("")}</datalist>`,
+      del: `<div class="confirm">Xoá vĩnh viễn ${n} sản phẩm cùng mọi phân loại và lịch sử kho của chúng? Không hoàn tác được. Đơn hàng cũ vẫn giữ nguyên tên và giá. Nếu chỉ muốn ngừng bán, hãy bấm <strong>Ẩn</strong>.</div>`,
+    };
+    box.innerHTML = forms[kind] ? `<form class="bulk-form" id="bForm2" novalidate>${forms[kind]}<p class="err" id="bErr2" role="alert"></p><div class="e-actions"><button class="btn${kind === "del" ? " danger" : ""} sm" type="submit" id="bGo">${kind === "del" ? `Xoá vĩnh viễn ${n} sản phẩm` : "Áp dụng"}</button><button class="btn ghost sm" type="button" id="bCancel">Huỷ</button></div><p class="hint" id="bPrev"></p></form>` : "";
+    const f = box.querySelector("input:not([type=checkbox])"); if (f) f.focus();
+    if (kind === "disc" || kind === "price") previewBulk();
+  }
+  function previewBulk() {
+    if (!$("bPrev") || !$("bVal")) return;
+    const v = $("bVal").value, fam = selFamily();
+    if (v === "") { $("bPrev").textContent = ""; return; }
+    const res = bulkCalc(fam, v);
+    const ok = res.filter(r => r.patch), bad = res.length - ok.length;
+    const ex = ok.slice(0, 2).map(r => `${r.p.name}${r.p.vol ? ` (${r.p.vol})` : ""}: ${vnd(r.p.sale || r.p.price)} → ${vnd(r.patch.sale ?? r.patch.price)}`).join(" · ");
+    $("bPrev").textContent = `${ok.length} dòng sẽ đổi${bad ? `, ${bad} dòng bỏ qua (mức giảm lớn hơn giá)` : ""}. Ví dụ: ${ex}`;
+  }
+  function bulkCalc(fam, val) {
+    const v = Number(val);
+    return fam.map(p => {
+      if (bulkKind === "price") {
+        if (!v || v <= -100) return { p, patch: null };
+        const f = 1 + v / 100, price = r1000(p.price * f), sale = p.sale ? r1000(p.sale * f) : null;
+        return { p, patch: price > 0 ? { price, sale: sale && sale < price ? sale : null } : null };
+      }
+      const mode = $("bMode").value, base = $("bFromSale").checked && p.sale ? p.sale : p.price;
+      const sale = mode === "pct" ? (v > 0 && v < 100 ? r1000(base * (1 - v / 100)) : 0) : Math.round(base - v);
+      return { p, patch: v > 0 && sale > 0 && sale < p.price ? { sale } : null };
+    });
+  }
+  async function runBulk(kind) {
+    const roots = selRoots(), ids = roots.map(p => p.id), famIds = roots.flatMap(famOf).map(p => p.id);
+    const done = async (q, msg) => { const { error } = await q; if (error) return fail(error, "Không lưu được"); await reloadProducts(); needRebuild(true); toast(msg); closeBulk(); };
+    if (kind === "show") return done(sb.from("products").update({ visible: true }).in("id", ids), `Đã hiện ${ids.length} sản phẩm`);
+    if (kind === "hide") return done(sb.from("products").update({ visible: false }).in("id", ids), `Đã ẩn ${ids.length} sản phẩm`);
+    if (kind === "new") return done(sb.from("products").update({ is_new: true }).in("id", ids), `Đã gắn Mới về cho ${ids.length} sản phẩm`);
+    if (kind === "unnew") return done(sb.from("products").update({ is_new: false }).in("id", ids), `Đã bỏ Mới về ${ids.length} sản phẩm`);
+    if (kind === "undisc") return done(sb.from("products").update({ sale: null }).in("id", famIds), `Đã bỏ giảm giá ${ids.length} sản phẩm`);
+    const err = m => { $("bErr2").textContent = m; };
+    if (kind === "cat") { const sub = $("bSub").value.trim(); if (!sub) return err("Nhập danh mục."); return done(sb.from("products").update({ cat: $("bCat").value, sub }).in("id", ids), `Đã chuyển ${ids.length} sản phẩm sang ${sub}`); }
+    if (kind === "brand") { const b = $("bBrand").value.trim(); if (!b) return err("Nhập thương hiệu."); return done(sb.from("products").update({ brand: b }).in("id", ids), `Đã đổi thương hiệu ${ids.length} sản phẩm`); }
+    if (kind === "del") return done(sb.from("products").delete().in("id", ids), `Đã xoá ${ids.length} sản phẩm`).then(() => ids.forEach(id => pSel.delete(id)));
+    if (kind === "disc" || kind === "price") {
+      const v = $("bVal").value;
+      if (v === "") return err(kind === "disc" ? "Nhập mức giảm." : "Nhập phần trăm.");
+      if (kind === "disc" && $("bMode").value === "pct" && !(Number(v) > 0 && Number(v) < 100)) return err("Phần trăm giảm phải từ 1 đến 99.");
+      const jobs = bulkCalc(roots.flatMap(famOf), v).filter(r => r.patch);
+      if (!jobs.length) return err("Không có dòng nào đổi được với mức này.");
+      $("bGo").disabled = true;
+      let i = 0, okN = 0; const errs = [];
+      const work = async () => { while (i < jobs.length) { const r = jobs[i++]; const { error } = await sb.from("products").update(r.patch).eq("id", r.p.id); if (error) errs.push(`${r.p.name}: ${error.message}`); else okN++; $("bGo").textContent = `Đang lưu ${okN}/${jobs.length}…`; } };
+      await Promise.all([work(), work(), work(), work(), work(), work()]);
+      await reloadProducts(); needRebuild(true);
+      if (errs.length) { $("bGo").disabled = false; $("bGo").textContent = "Áp dụng"; return err(`Lưu được ${okN}, lỗi ${errs.length}: ${errs.slice(0, 2).join("; ")}`); }
+      toast(kind === "disc" ? `Đã giảm giá ${okN} dòng sản phẩm` : `Đã đổi giá ${okN} dòng sản phẩm`); closeBulk();
+    }
+  }
+  function closeBulk() { bulkKind = ""; $("pBulkForm").innerHTML = ""; }
+  async function reloadProducts() { const { data, error } = await sb.from("products").select("*").order("id"); if (!error) products = data; renderProducts(); }
+
+  /* ---- xuất / nhập file CSV ---- */
+  const csvCell = v => { const s = String(v ?? ""); return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const CSV_HEAD = ["id", "thuoc_san_pham", "ten", "thuong_hieu", "danh_muc", "phan_loai", "gia_goc", "gia_sale", "giam_pct", "hien", "con_hang", "hang_order", "moi_ve", "anh", "link"];
+  function exportProducts() {
+    const { list } = pFiltered();
+    const rows = list.flatMap(famOf).map(p => [p.id, p.variant_of || "", p.name, p.brand, p.sub, p.vol, p.price, p.sale || "", p.sale ? Math.round((1 - p.sale / p.price) * 100) : "", p.visible ? "co" : "khong", p.in_stock ? "co" : "khong", p.preorder ? "co" : "khong", p.is_new ? "co" : "khong", (p.images || []).length, `${CFG.site || ""}/san-pham/${pslug(`${rootOf(p).name} ${rootOf(p).brand}`)}/`]);
+    const csv = "\ufeff" + [CSV_HEAD, ...rows].map(r => r.map(csvCell).join(",")).join("\r\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    a.download = `san-pham-luna-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    toast(`Đã xuất ${rows.length} dòng. Sửa cột gia_goc, gia_sale, hien, con_hang, moi_ve rồi tải lên lại.`);
+  }
+  function parseCsv(text) {
+    text = text.replace(/^\ufeff/, "");
+    const first = text.split(/\r?\n/)[0], sep = (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ";" : ",";
+    const rows = []; let row = [], cell = "", q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+      else if (c === '"') q = true;
+      else if (c === sep) { row.push(cell); cell = ""; }
+      else if (c === "\n" || c === "\r") { if (c === "\r" && text[i + 1] === "\n") i++; row.push(cell); rows.push(row); row = []; cell = ""; }
+      else cell += c;
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter(r => r.some(x => x.trim()));
+  }
+  let csvPlan = [];
+  async function readCsvFile(file) {
+    const rows = parseCsv(await file.text());
+    const head = (rows.shift() || []).map(h => norm(h).trim().replace(/\s+/g, "_"));
+    const col = n => head.indexOf(n);
+    if (col("id") < 0) { $("pCsvBox").innerHTML = `<p class="err">File cần có cột <b>id</b> (xuất file từ nút “Xuất file Excel” rồi sửa).</p>`; return; }
+    const { data: inv } = await sb.from("inventory").select("product_id");
+    const tracked = new Set((inv || []).map(r => r.product_id));
+    const money = s => { const t = String(s || "").replace(/[^\d]/g, ""); return t ? Number(t) : null; };
+    const yes = s => { const t = norm(s).trim(); return ["co", "x", "1", "yes", "true", "hien", "con"].includes(t) ? true : ["khong", "0", "no", "false", "an", "het", ""].includes(t) ? false : null; };
+    const get = (r, n) => (col(n) >= 0 ? r[col(n)] ?? "" : undefined);
+    csvPlan = []; const errs = []; let skipStock = 0;
+    rows.forEach((r, k) => {
+      const id = Number(get(r, "id")), p = products.find(x => x.id === id);
+      if (!p) { errs.push(`Dòng ${k + 2}: không có sản phẩm id ${get(r, "id")}`); return; }
+      const patch = {};
+      const gp = get(r, "gia_goc"), gs = get(r, "gia_sale"), gpct = get(r, "giam_pct");
+      const price = gp !== undefined && money(gp) ? money(gp) : p.price;
+      if (price !== p.price) patch.price = price;
+      let sale = p.sale || null;
+      if (gs !== undefined) sale = money(gs);
+      if ((gs === undefined || !money(gs)) && gpct !== undefined && Number(String(gpct).replace(",", ".")) > 0) sale = r1000(price * (1 - Number(String(gpct).replace(",", ".")) / 100));
+      if (sale !== null && !(sale > 0 && sale < price)) { errs.push(`Dòng ${k + 2} (${p.name}): giá sale phải nhỏ hơn giá gốc`); return; }
+      if ((sale || null) !== (p.sale || null)) patch.sale = sale;
+      if (!p.variant_of) { const h = yes(get(r, "hien")); if (h !== null && get(r, "hien") !== undefined && h !== p.visible) patch.visible = h; const n = yes(get(r, "moi_ve")); if (n !== null && get(r, "moi_ve") !== undefined && n !== p.is_new) patch.is_new = n; }
+      const st = yes(get(r, "con_hang"));
+      if (st !== null && get(r, "con_hang") !== undefined && st !== p.in_stock) { if (tracked.has(p.id)) skipStock++; else patch.in_stock = st; }
+      if (Object.keys(patch).length) csvPlan.push({ p, patch });
+    });
+    const label = { price: "giá gốc", sale: "giá sale", visible: "hiện/ẩn", is_new: "mới về", in_stock: "còn hàng" };
+    $("pCsvBox").innerHTML = `<div class="panel csv-plan"><strong>File ${esc(file.name)}: ${csvPlan.length} dòng có thay đổi</strong>
+      ${csvPlan.length ? `<ul>${csvPlan.slice(0, 8).map(({ p, patch }) => `<li>${esc(p.name)}${p.vol ? ` (${esc(p.vol)})` : ""}: ${Object.keys(patch).map(k => `${label[k]} ${k === "price" || k === "sale" ? (patch[k] ? vnd(patch[k]) : "bỏ") : patch[k] ? "có" : "không"}`).join(", ")}</li>`).join("")}${csvPlan.length > 8 ? `<li>… và ${csvPlan.length - 8} dòng nữa</li>` : ""}</ul>` : ""}
+      ${skipStock ? `<p class="hint">${skipStock} dòng đổi “còn hàng” bị bỏ qua vì sản phẩm đang quản lý theo kho (đổi ở mục Kho).</p>` : ""}
+      ${errs.length ? `<p class="err">${errs.length} dòng lỗi: ${esc(errs.slice(0, 3).join("; "))}${errs.length > 3 ? "…" : ""}</p>` : ""}
+      <div class="e-actions">${csvPlan.length ? `<button class="btn sm" type="button" id="csvGo">Cập nhật ${csvPlan.length} dòng</button>` : ""}<button class="btn ghost sm" type="button" id="csvNo">Đóng</button></div></div>`;
+  }
+  async function applyCsv() {
+    const btn = $("csvGo"); btn.disabled = true;
+    let i = 0, okN = 0; const errs = [];
+    const work = async () => { while (i < csvPlan.length) { const { p, patch } = csvPlan[i++]; const { error } = await sb.from("products").update(patch).eq("id", p.id); if (error) errs.push(`${p.name}: ${error.message}`); else okN++; btn.textContent = `Đang cập nhật ${okN}/${csvPlan.length}…`; } };
+    await Promise.all([work(), work(), work(), work(), work(), work()]);
+    await reloadProducts(); needRebuild(true);
+    $("pCsvBox").innerHTML = errs.length ? `<p class="err">Cập nhật được ${okN}, lỗi ${errs.length}: ${esc(errs.slice(0, 3).join("; "))}</p>` : "";
+    if (!errs.length) toast(`Đã cập nhật ${okN} dòng từ file`);
+    csvPlan = [];
+  }
+
   async function toggleProduct(id, field) {
     const p = products.find(x => x.id === id);
     if (field === "in_stock" && p.preorder) { toast("Đây là hàng order: luôn nhận đặt. Tắt “Hàng order” trong Sửa sản phẩm nếu muốn ngừng."); return; }
@@ -196,7 +428,7 @@
   function openEditor(p) {
     p = rootOf(p);
     editing = p ? p.id : null;
-    eVars = p ? kidsOf(p.id).map(k => ({ id: k.id, vol: k.vol || "", price: k.price, sale: k.sale || "", in_stock: k.in_stock, preorder: !!k.preorder, del: false })) : [];
+    eVars = p ? kidsOf(p.id).map(k => ({ id: k.id, vol: k.vol || "", price: k.price, dval: valFrom(k.price, k.sale, dMode), in_stock: k.in_stock, preorder: !!k.preorder, del: false })) : [];
     eImages = p ? [...(p.images || [])] : [];
     p = p || { cat: "skincare", sub: "", brand: "", origin: "", name: "", vol: "", price: "", sale: "", is_new: true, in_stock: true, visible: true, pop: 5, actives: [], skin: [], concerns: [], descr: "", howto: "", ingredients: "", shape: "dropper", tint: "#f2e6d6" };
     const subs = [...new Set([...(CFG.taxonomy?.subs || []), ...products.map(x => x.sub)])];
@@ -214,7 +446,14 @@
         <label class="f" for="e_vol">Dung tích / phân loại<input id="e_vol" value="${esc(p.vol)}" placeholder="30ml"></label>
         <label class="f" for="e_pop">Độ bán chạy (1–10)<input id="e_pop" type="number" min="1" max="10" value="${esc(p.pop)}"></label>
         <label class="f" for="e_price">Giá gốc (đ)<input id="e_price" type="number" min="0" step="1000" value="${esc(p.price)}" required></label>
-        <label class="f" for="e_sale">Giá sale (đ, để trống nếu không sale)<input id="e_sale" type="number" min="0" step="1000" value="${esc(p.sale || "")}"></label>
+      </div>
+      <div class="f">Giảm giá <span class="hint">Để trống nếu không giảm. Chọn cách nhập rồi gõ số; web hiện giá sau giảm và nhãn −%.</span>
+        <div class="disc">
+          <label class="sr" for="e_dmode">Cách giảm</label><select id="e_dmode">${DMODES.map(([k, l]) => `<option value="${k}"${k === dMode ? " selected" : ""}>${l}</option>`).join("")}</select>
+          <label class="sr" for="e_dval">Mức giảm</label><span class="dval"><input id="e_dval" type="number" min="0" step="any" inputmode="decimal" value="${esc(valFrom(p.price, p.sale, dMode))}" placeholder="${dMode === "pct" ? "Ví dụ 15" : "Ví dụ 50000"}"><b id="e_dunit">${dUnit(dMode)}</b></span>
+          <button type="button" class="btn ghost sm" id="eDiscAll"${eVars.length ? "" : " hidden"}>Áp dụng cho mọi phân loại</button>
+        </div>
+        <span class="hint ok" id="e_dprev" aria-live="polite"></span>
       </div>
       <div class="f">Phân loại hàng
         <span class="hint">Thêm khi sản phẩm có nhiều dung tích / màu, mỗi loại có giá và tồn kho riêng. Phân loại đầu tiên là dung tích và giá ở trên.</span>
@@ -241,7 +480,7 @@
         <label class="f" for="e_tint">Màu nền thẻ<input id="e_tint" type="color" value="${esc(p.tint)}"></label>
         <label class="f" for="e_shape">Hình minh hoạ khi chưa có ảnh<select id="e_shape">${SHAPES.map(([k, l]) => `<option value="${k}"${k === p.shape ? " selected" : ""}>${l}</option>`).join("")}</select></label>
       </div>`;
-    renderImgs(); renderVars();
+    renderImgs(); renderVars(); syncDisc();
     $("editor").classList.add("on"); $("scrim").classList.add("on");
     setTimeout(() => $("e_name").focus(), 50);
   }
@@ -266,20 +505,20 @@
   async function saveProduct() {
     const v = id => $(id).value.trim();
     const checked = n => [...$("eForm").querySelectorAll(`input[name="${n}"]:checked`)].map(i => i.value);
-    const price = parseInt(v("e_price"), 10), sale = v("e_sale") ? parseInt(v("e_sale"), 10) : null;
+    const price = parseInt(v("e_price"), 10), sale = saleFrom(price, dMode, v("e_dval")), sErr = price > 0 ? saleErr(price, dMode, v("e_dval")) : "";
     const err = [];
     if (v("e_name").length < 3) err.push("Nhập tên sản phẩm.");
     if (!v("e_brand")) err.push("Nhập thương hiệu.");
     if (!v("e_sub")) err.push("Nhập danh mục.");
     if (!(price > 0)) err.push("Nhập giá gốc.");
-    if (sale !== null && !(sale > 0 && sale < price)) err.push("Giá sale phải nhỏ hơn giá gốc.");
+    if (sErr) err.push(`Giảm giá: ${sErr}.`);
     const live = eVars.filter(x => !x.del);
     if (live.length && !v("e_vol")) err.push("Có phân loại: hãy ghi dung tích / tên cho phân loại đầu tiên.");
     live.forEach((x, i) => {
-      const pr = Number(x.price), sl = x.sale === "" || x.sale === null ? null : Number(x.sale);
+      const pr = Number(x.price), e2 = pr > 0 ? saleErr(pr, dMode, x.dval) : "";
       if (!String(x.vol).trim()) err.push(`Phân loại ${i + 2}: nhập dung tích / tên.`);
       if (!(pr > 0)) err.push(`Phân loại ${i + 2}: nhập giá.`);
-      if (sl !== null && !(sl > 0 && sl < pr)) err.push(`Phân loại ${i + 2}: giá sale phải nhỏ hơn giá gốc.`);
+      if (e2) err.push(`Phân loại ${i + 2}: ${e2}.`);
     });
     const labels = [v("e_vol"), ...live.map(x => String(x.vol).trim())].filter(Boolean).map(norm);
     if (new Set(labels).size < labels.length) err.push("Hai phân loại đang trùng tên.");
@@ -310,7 +549,7 @@
     for (const x of eVars) {
       try {
         if (x.del) { if (x.id) { const { error } = await sb.from("products").delete().eq("id", x.id); if (error) throw error; } continue; }
-        const row = { vol: String(x.vol).trim(), price: Number(x.price), sale: x.sale === "" || x.sale === null ? null : Number(x.sale), in_stock: !!x.in_stock, preorder: !!x.preorder, position: pos++ };
+        const row = { vol: String(x.vol).trim(), price: Number(x.price), sale: saleFrom(x.price, dMode, x.dval), in_stock: !!x.in_stock, preorder: !!x.preorder, position: pos++ };
         const r = x.id ? await sb.from("products").update(row).eq("id", x.id).select().single()
           : await sb.from("products").insert({ ...row, variant_of: main.id, name: main.name, brand: main.brand, cat: main.cat, sub: main.sub }).select().single();
         if (r.error) throw r.error;
@@ -324,7 +563,7 @@
     $("e_vars").innerHTML = live.map(({ x, i }, n) => `<div class="var-row">
       <label class="sr" for="vv${i}">Phân loại ${n + 2}</label><input id="vv${i}" data-vf="vol" data-vi="${i}" value="${esc(x.vol)}" placeholder="Phân loại ${n + 2}: 50ml">
       <label class="sr" for="vp${i}">Giá</label><input id="vp${i}" type="number" min="0" step="1000" data-vf="price" data-vi="${i}" value="${esc(x.price)}" placeholder="Giá gốc">
-      <label class="sr" for="vs${i}">Giá sale</label><input id="vs${i}" type="number" min="0" step="1000" data-vf="sale" data-vi="${i}" value="${esc(x.sale)}" placeholder="Giá sale">
+      <label class="sr" for="vs${i}">Mức giảm</label><span class="dval"><input id="vs${i}" type="number" min="0" step="any" data-vf="dval" data-vi="${i}" value="${esc(x.dval)}" placeholder="Giảm"><b>${dUnit(dMode)}</b></span>
       <label class="ckl"><input type="checkbox" data-vf="in_stock" data-vi="${i}"${x.in_stock ? " checked" : ""}>Còn hàng</label>
       <label class="ckl"><input type="checkbox" data-vf="preorder" data-vi="${i}"${x.preorder ? " checked" : ""}>Order</label>
       <button type="button" class="x" data-vdel="${i}" aria-label="Xoá phân loại ${esc(x.vol)}">×</button></div>`).join("")
@@ -986,10 +1225,25 @@
       if (error) fail(error, "Đã đánh dấu bom hàng nhưng chưa chặn được số"); else { toast(`Đã chặn COD số ${o.phone}`); loaded.blocked = false; }
     }
     else if (d.tg) toggleProduct(Number(d.pid), d.tg);
+    else if (d.pst) { pF.status = d.pst; pF.page = 1; renderProducts(); }
+    else if (d.pg) { pF.page = Number(d.pg); renderProducts(); $("v-products").scrollIntoView({ block: "start" }); }
+    else if (t.id === "pSelAll") { pFiltered().list.forEach(p => pSel.add(p.id)); renderProducts(); }
+    else if (t.id === "pSelNone") { pSel.clear(); closeBulk(); renderProducts(); }
+    else if (d.bulk) { if (["show", "hide", "new", "unnew", "undisc"].includes(d.bulk)) { bulkKind = d.bulk; runBulk(d.bulk); } else openBulk(d.bulk); }
+    else if (t.id === "bCancel") closeBulk();
+    else if (t.id === "pCsv") exportProducts();
+    else if (t.id === "csvGo") applyCsv();
+    else if (t.id === "csvNo") { csvPlan = []; $("pCsvBox").innerHTML = ""; }
     else if (d.edit) openEditor(products.find(p => p.id === Number(d.edit)));
     else if (t.id === "pNew") openEditor(null);
-    else if (t.id === "eAddVar") { eVars.push({ vol: "", price: $("e_price").value || "", sale: "", in_stock: true, preorder: false, del: false }); renderVars(); const ins = $("e_vars").querySelectorAll('[data-vf="vol"]'); ins[ins.length - 1].focus(); }
+    else if (t.id === "eAddVar") { eVars.push({ vol: "", price: $("e_price").value || "", dval: dMode === "pct" ? $("e_dval").value : "", in_stock: true, preorder: false, del: false }); renderVars(); $("eDiscAll").hidden = false; const ins = $("e_vars").querySelectorAll('[data-vf="vol"]'); ins[ins.length - 1].focus(); }
     else if (d.vdel !== undefined) { const x = eVars[Number(d.vdel)]; if (x.id) x.del = true; else eVars.splice(Number(d.vdel), 1); renderVars(); }
+    else if (t.id === "eDiscAll") {
+      const v0 = $("e_dval").value, pr0 = Number($("e_price").value);
+      // %: dùng cùng %; số tiền: cùng số tiền; giá sau giảm: giữ cùng tỉ lệ giảm
+      eVars.forEach(x => { if (x.del) return; x.dval = dMode === "price" ? (v0 && pr0 ? r1000(Number(x.price) * Number(v0) / pr0) : "") : v0; });
+      renderVars(); toast(v0 ? "Đã áp dụng mức giảm cho mọi phân loại" : "Đã bỏ giảm giá ở mọi phân loại");
+    }
     else if (t.id === "eClose") closeEditor();
     else if (t.id === "eDel") $("eDelConfirm").hidden = false;
     else if (t.id === "eDelNo") $("eDelConfirm").hidden = true;
@@ -1030,17 +1284,41 @@
       updateOrder(o.id, patch, patch.status ? "Đã lưu mã vận đơn, chuyển sang “Đang giao”" : "Đã lưu mã vận đơn");
     }
     else if (t.id === "e_upload") upload(t.files);
+    else if (d.psel) { const id = Number(d.psel); t.checked ? pSel.add(id) : pSel.delete(id); t.closest(".p-row").classList.toggle("picked", t.checked); renderProducts(); }
+    else if (t.id === "pBrand") { pF.brand = t.value; pF.page = 1; renderProducts(); }
+    else if (t.id === "pSub") { pF.sub = t.value; pF.page = 1; renderProducts(); }
+    else if (t.id === "pSort") { pF.sort = t.value; pF.page = 1; renderProducts(); }
+    else if (t.id === "pCsvIn") { if (t.files[0]) readCsvFile(t.files[0]); t.value = ""; }
+    else if (t.id === "bMode") { $("bUnit").textContent = t.value === "pct" ? "%" : "đ"; $("bVal").placeholder = t.value === "pct" ? "Ví dụ 15" : "Ví dụ 50000"; previewBulk(); }
+    else if (t.id === "bFromSale") previewBulk();
     else if (t.id === "kKind") syncKindForm();
     else if (d.vf) eVars[Number(d.vi)][d.vf] = t.type === "checkbox" ? t.checked : t.value;
+    else if (t.id === "e_dmode") {
+      const old = dMode, nw = t.value, pr = Number($("e_price").value);
+      const conv = (price, val) => { const sl = saleFrom(price, old, val); return sl && !saleErr(price, old, val) ? valFrom(Number(price), sl, nw) : val === "" ? "" : ""; };
+      $("e_dval").value = conv(pr, $("e_dval").value);
+      eVars.forEach(x => { x.dval = conv(x.price, x.dval); });
+      dMode = nw; try { localStorage.setItem("luna-admin-dmode", nw); } catch (e) {}
+      $("e_dunit").textContent = dUnit(nw); $("e_dval").placeholder = nw === "pct" ? "Ví dụ 15" : "Ví dụ 50000";
+      renderVars(); syncDisc();
+    }
   });
+  document.addEventListener("input", e => { if (["e_dval", "e_price"].includes(e.target.id)) syncDisc(); if (e.target.id === "bVal") previewBulk(); });
+  function syncDisc() {
+    if (!$("e_dprev")) return;
+    const pr = Number($("e_price").value), val = $("e_dval").value, er = pr > 0 ? saleErr(pr, dMode, val) : "";
+    $("e_dprev").textContent = er ? `⚠ ${er}` : dPreview(pr, dMode, val);
+    $("e_dprev").classList.toggle("bad", !!er);
+  }
   $("eForm").addEventListener("submit", e => { e.preventDefault(); saveProduct(); });
   document.addEventListener("submit", e => {
     if (e.target.id === "kForm") { e.preventDefault(); saveStock(); }
+    if (e.target.id === "bForm2") { e.preventDefault(); runBulk(bulkKind); }
     if (e.target.id === "kMeta") { e.preventDefault(); saveStockMeta(); }
   });
   $("kSearch").addEventListener("input", e => { kQuery = e.target.value; renderStock(); });
   $("oSearch").addEventListener("input", e => { oQuery = e.target.value; renderOrders(); });
-  $("pSearch").addEventListener("input", e => { pQuery = e.target.value; renderProducts(); });
+  $("pSearch").addEventListener("input", e => { pQuery = e.target.value; pF.page = 1; renderProducts(); });
   const closePanels = () => { if (!closeImport()) return; closeEditor(); closeStock(); };
   $("scrim").addEventListener("click", closePanels);
   document.addEventListener("keydown", e => { if (e.key === "Escape") closePanels(); });

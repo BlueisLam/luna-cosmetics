@@ -1,13 +1,16 @@
 /* Luna Cosmetics — giỏ hàng, bộ lọc cửa hàng, thanh toán */
 (() => {
   const { products: ALL, cfg: CFG, needs: NEEDS, art: ACCENT } = window.LUNA;
+  // dữ liệu công khai: ok = đặt được, ship = thời gian giao (chỉ có với hàng giao chậm)
+  const applyRow = (p, r) => { p.preorder = !!r.ship; p.lead = r.ship || ""; p.inStock = !!r.ok && !r.ship; };
+  ALL.forEach(p => applyRow(p, p));
   const P = ALL.filter(p => !p.parent); // sản phẩm chính (phân loại hàng nằm trong ALL)
   const $ = id => document.getElementById(id);
   const byId = id => ALL.find(p => p.id == id);
   const family = p => [p, ...ALL.filter(k => k.parent === p.id).sort((a, b) => (a.pos || 0) - (b.pos || 0) || (a.sale || a.price) - (b.sale || b.price))];
   const minPrice = p => Math.min(...family(p).map(m => m.sale || m.price));
   const vlabel = p => (p.vol ? ` · ${esc(p.vol)}` : "");
-  const preRate = () => Math.round((CFG.preorderDepositRate ?? 0.5) * 100);
+  const preRate = () => Math.round((CFG.lateDepositRate ?? 0.5) * 100);
   const priceOf = p => p.sale || p.price;
   const vnd = n => n.toLocaleString("vi-VN").replace(/,/g, ".") + "đ";
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -25,6 +28,17 @@
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json();
   };
+  // giá / còn hàng mới nhất (view "catalog"; Supabase cũ thì đọc bảng products)
+  async function liveRows(ids) {
+    const f = ids && ids.length ? `id=in.(${ids.join(",")})&` : "";
+    try {
+      const rows = await rest(`catalog?${f}select=id,price,sale,available,ship_time`);
+      return rows.map(r => ({ id: r.id, price: r.price, sale: r.sale, ok: r.available, ship: r.ship_time || "" }));
+    } catch (e) {
+      const rows = await rest(`products?${f}select=id,price,sale,in_stock,preorder,lead_time`);
+      return rows.map(r => ({ id: r.id, price: r.price, sale: r.sale, ok: r.in_stock || r.preorder, ship: r.preorder ? r.lead_time || "7–14 ngày" : "" }));
+    }
+  }
   const MAX_QTY = 20;
   // Số bị chặn COD được kiểm tra trên server, danh sách không lộ ra web
   const blocked = {};
@@ -90,6 +104,8 @@
     const pr = $("pdPrice") || document.querySelector(".pdp .prices"); if (pr) pr.innerHTML = priceHtml(m);
     document.querySelectorAll("[data-add-qty]").forEach(b => { b.dataset.addQty = m.id; });
     document.querySelectorAll("[data-buy-now]").forEach(b => { b.dataset.buyNow = m.id; });
+    const sv = $("pdSave"); if (sv) { sv.hidden = !m.sale; sv.textContent = m.sale ? `Tiết kiệm ${vnd(m.price - m.sale)}` : ""; }
+    const sbp = $("sbPrice"); if (sbp) sbp.textContent = vnd(priceOf(m));
     const pre = $("pdPre");
     if (pre) { pre.hidden = !m.preorder; if (m.preorder) pre.textContent = `Thời gian giao dự kiến: ${m.lead || "7–14 ngày"}.${preRate() ? ` Thanh toán khi nhận hàng (COD) cần cọc trước ${preRate()}%.` : ""}`; }
   }
@@ -110,7 +126,8 @@
     { k: "tren-1.5tr", l: "Trên 1,5 triệu", t: p => p >= 1500000 },
   ];
   const FLAGS = { all: () => true, new: p => p.isNew, sale: p => family(p).some(m => m.sale), best: p => p.pop >= 9 };
-  const S = { tab: "all", sub: "Tất cả", sort: "pop", flag: "all", q: "", sel: {}, open: new Set(GROUPS.map(g => g.key)) };
+  const PAGE = 48;
+  const S = { limit: PAGE, key: "", tab: "all", sub: "Tất cả", sort: "pop", flag: "all", q: "", sel: {}, open: new Set(GROUPS.map(g => g.key)) };
   GROUPS.forEach(g => (S.sel[g.key] = new Set()));
   const valsOf = (p, k) => k === "brand" ? [p.brand] : k === "price" ? PRICES.filter(r => r.t(minPrice(p))).map(r => r.k) : p[k] || [];
   const inTab = p => S.tab === "all" || p.cat === S.tab;
@@ -181,7 +198,9 @@
     const list = P.filter(p => base(p) && facets(p));
     const pct = p => (p.sale ? 1 - p.sale / p.price : 0);
     list.sort((a, b) => S.sort === "asc" ? minPrice(a) - minPrice(b) : S.sort === "desc" ? minPrice(b) - minPrice(a) : S.sort === "discount" ? pct(b) - pct(a) : S.sort === "new" ? (!!b.isNew - !!a.isNew) || b.id - a.id : b.pop - a.pop);
-    const gridEl = $("grid"), show = new Set(list.map(p => String(p.id)));
+    const key = JSON.stringify([S.tab, S.sub, S.flag, S.q, S.sort, GROUPS.map(g => [...S.sel[g.key]])]);
+    if (key !== S.key) { S.key = key; S.limit = PAGE; }
+    const gridEl = $("grid"), show = new Set(list.slice(0, S.limit).map(p => String(p.id)));
     const cards = [...gridEl.querySelectorAll(".card")];
     cards.forEach(c => (c.hidden = !show.has(c.dataset.id)));
     list.forEach(p => { const c = gridEl.querySelector(`.card[data-id="${p.id}"]`); if (c) gridEl.appendChild(c); });
@@ -189,6 +208,11 @@
     if (!list.length && !none) { none = document.createElement("div"); none.className = "nores"; none.innerHTML = `Chưa có sản phẩm khớp bộ lọc.<br><button type="button" class="linkish" data-clear>Xoá bộ lọc</button>`; gridEl.appendChild(none); }
     if (none) none.hidden = !!list.length;
     $("result").textContent = `${list.length} sản phẩm`;
+    let more = $("moreBtn");
+    if (!more) { const box = document.createElement("div"); box.className = "more"; box.innerHTML = `<button type="button" class="btn ghost" id="moreBtn"></button>`; gridEl.after(box); more = $("moreBtn"); }
+    const left = list.length - S.limit;
+    more.parentElement.hidden = left <= 0;
+    more.textContent = `Xem thêm ${Math.min(PAGE, left)} sản phẩm (còn ${left})`;
     writeURL();
   }
   function clearShop() { GROUPS.forEach(g => S.sel[g.key].clear()); S.q = ""; if ($("q")) $("q").value = ""; S.flag = "all"; S.sub = "Tất cả"; renderShop(); }
@@ -357,14 +381,14 @@
     const ids = Object.keys(cart).filter(id => /^\d+$/.test(id));
     if (!SB || !ids.length) return;
     try {
-      const [rows, st] = await Promise.all([rest(`products?id=in.(${ids.join(",")})&select=id,name,price,sale,in_stock,preorder,lead_time`), rest("shop_settings?id=eq.1&select=*")]);
+      const [rows, st] = await Promise.all([liveRows(ids), rest("shop_settings?id=eq.1&select=*")]);
       const s = st && st[0];
-      if (s) Object.assign(CFG, { shipFee: s.ship_fee, codFee: s.cod_fee, codDepositFrom: s.cod_deposit_from, codDepositRate: Number(s.cod_deposit_rate), codMax: s.cod_max, ...(s.preorder_deposit_rate != null ? { preorderDepositRate: Number(s.preorder_deposit_rate) } : {}) });
+      if (s) Object.assign(CFG, { shipFee: s.ship_fee, codFee: s.cod_fee, codDepositFrom: s.cod_deposit_from, codDepositRate: Number(s.cod_deposit_rate), codMax: s.cod_max, ...(s.preorder_deposit_rate != null ? { lateDepositRate: Number(s.preorder_deposit_rate) } : {}) });
       const gone = [], changed = [];
       ids.forEach(id => {
         const p = byId(id), r = rows.find(x => String(x.id) === id);
-        if (r) { p.preorder = !!r.preorder; p.lead = r.lead_time || p.lead; }
-        if (!r || (!r.in_stock && !r.preorder)) { gone.push(p.name + (p.vol ? ` ${p.vol}` : "")); delete cart[id]; p.inStock = false; return; }
+        if (r) applyRow(p, r);
+        if (!r || !r.ok) { gone.push(p.name + (p.vol ? ` ${p.vol}` : "")); delete cart[id]; p.inStock = false; return; }
         const before = priceOf(p);
         p.price = r.price; p.sale = r.sale || 0;
         if (priceOf(p) !== before) changed.push(p.name + (p.vol ? ` ${p.vol}` : ""));
@@ -380,9 +404,11 @@
     const cards = document.querySelectorAll(".card[data-id]"), buy = document.querySelector("[data-buy]");
     if (!SB || (!cards.length && !buy && !vbox)) return;
     let rows;
-    try { rows = await rest("products?select=id,price,sale,in_stock,preorder,lead_time"); } catch (e) { return; }
+    // chỉ hỏi những sản phẩm đang có trên trang (và phân loại của chúng)
+    const ids = [...new Set([...cards].map(c => c.dataset.id).concat(buy ? [buy.dataset.buy] : [], vbox ? [vbox.dataset.variants] : []).flatMap(id => { const p = byId(id); return p ? family(p).map(m => m.id) : []; }))];
+    try { rows = await liveRows(ids.length <= 150 ? ids : null); } catch (e) { return; }
     const byRow = Object.fromEntries(rows.map(r => [String(r.id), r]));
-    ALL.forEach(p => { const r = byRow[String(p.id)]; if (r) { p.inStock = r.in_stock; p.preorder = !!r.preorder; p.lead = r.lead_time || p.lead; p.price = r.price; p.sale = r.sale || 0; } });
+    ALL.forEach(p => { const r = byRow[String(p.id)]; if (r) { applyRow(p, r); p.price = r.price; p.sale = r.sale || 0; } });
     cards.forEach(c => {
       const p = byId(c.dataset.id), btn = c.querySelector(".add"); if (!p || !btn) return;
       const fam = family(p), many = fam.length > 1, any = fam.some(m => m.inStock || m.preorder);
@@ -516,6 +542,13 @@
       const v = d.copy;
       (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject()).then(() => (t.textContent = "Đã chép")).catch(() => (t.textContent = v));
     }
+    else if (t.id === "moreBtn") { S.limit += PAGE; renderShop(); }
+    else if (d.gthumb) goSlide(Number(d.gthumb));
+    else if (d.share) {
+      const url = d.share, title = d.shareTitle;
+      if (navigator.share) navigator.share({ title, url }).catch(() => {});
+      else (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(() => { t.textContent = "Đã chép link"; setTimeout(() => (t.textContent = "Chia sẻ"), 1500); }).catch(() => prompt("Chép link sản phẩm:", url));
+    }
     else if (t.id === "openBag") openBag();
     else if (t.id === "closeBag" || t.id === "closeF") closeAll();
     else if (t.id === "editCart") openBag();
@@ -539,6 +572,41 @@
   });
   document.addEventListener("toggle", e => { const g = e.target.dataset && e.target.dataset.g; if (g) e.target.open ? S.open.add(g) : S.open.delete(g); }, true);
   document.addEventListener("submit", e => { if (e.target.id === "ckForm") { e.preventDefault(); placeOrder(); } });
+
+  /* ---------- trang sản phẩm: ảnh, thanh mua dính, đã xem ---------- */
+  const track = $("gTrack");
+  function goSlide(i) { if (track) track.scrollTo({ left: i * track.clientWidth, behavior: "smooth" }); }
+  if (track) {
+    const thumbs = [...document.querySelectorAll("[data-gthumb]")], n = track.children.length;
+    let raf;
+    track.addEventListener("scroll", () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const i = Math.round(track.scrollLeft / Math.max(1, track.clientWidth));
+        thumbs.forEach((b, k) => b.setAttribute("aria-current", String(k === i)));
+        if ($("gCount")) $("gCount").textContent = `${i + 1}/${n}`;
+      });
+    }, { passive: true });
+  }
+  const sticky = $("stickyBuy"), buyBox = $("pdBuy");
+  if (sticky && buyBox && "IntersectionObserver" in window) {
+    sticky.hidden = false; document.body.classList.add("has-sb");
+    new IntersectionObserver(([en]) => {
+      const on = !en.isIntersecting && en.boundingClientRect.top < 0;
+      sticky.classList.toggle("on", on); sticky.setAttribute("aria-hidden", String(!on));
+      sticky.querySelectorAll("button").forEach(b => (b.tabIndex = on ? 0 : -1));
+    }).observe(buyBox);
+  }
+  const pdp = document.querySelector(".pdp[data-pid]");
+  if (pdp) {
+    const id = Number(pdp.dataset.pid);
+    const seen = store.get("luna-seen", []).filter(x => x !== id && byId(x) && !byId(x).parent);
+    if (seen.length && $("seen")) {
+      $("seenList").innerHTML = seen.slice(0, 10).map(x => { const p = byId(x); return `<a class="mini" href="${p.url}"><span class="mi" style="background:${p.tint}">${thumb(p)}</span><b>${esc(p.name)}</b><span>${family(p).length > 1 && new Set(family(p).map(priceOf)).size > 1 ? "Từ " : ""}${vnd(minPrice(p))}</span></a>`; }).join("");
+      $("seen").hidden = false;
+    }
+    store.set("luna-seen", [id, ...seen].slice(0, 12));
+  }
 
   /* ---------- khởi động ---------- */
   renderBag();

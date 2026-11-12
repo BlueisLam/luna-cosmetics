@@ -272,7 +272,7 @@ begin
   return jsonb_build_object(
     'code', o.code, 'created_at', o.created_at,
     'status', case when o.status = 'bom_hang' then 'da_huy' else o.status end,
-    'method', o.method, 'paid', o.paid, 'items', (select coalesce(jsonb_agg(e - 'cost'), '[]'::jsonb) from jsonb_array_elements(o.items) e),
+    'method', o.method, 'paid', o.paid, 'items', (select coalesce(jsonb_agg(e - 'cost' - 'preorder' - 'lead'), '[]'::jsonb) from jsonb_array_elements(o.items) e),
     'subtotal', o.subtotal, 'ship', o.ship, 'fee', o.fee, 'total', o.total, 'deposit', o.deposit,
     'buyer_name', o.buyer_name, 'address', o.address, 'city', o.city,
     'carrier', o.carrier, 'tracking_code', o.tracking_code,
@@ -494,6 +494,25 @@ alter table public.shop_settings add column if not exists preorder_deposit_rate 
 alter table public.orders drop constraint if exists orders_status_check;
 alter table public.orders add constraint orders_status_check
   check (status in ('cho_thanh_toan','cho_xac_nhan','da_xac_nhan','cho_hang','dang_giao','hoan_thanh','bom_hang','da_huy'));
+
+-- =====================================================================
+-- GIAI ĐOẠN 7: khách không đọc thẳng bảng products nữa
+-- Web khách chỉ đọc view "catalog": sản phẩm đang hiện, đúng các cột web cần.
+-- Không lộ: sản phẩm đang ẩn, cờ hàng order (chỉ còn "thời gian giao"), ngày tạo / sửa.
+-- =====================================================================
+create or replace view public.catalog with (security_barrier = true) as
+select p.id, p.variant_of, p.position, p.cat, p.sub, p.brand, p.origin, p.name, p.vol,
+       p.price, p.sale, p.is_new, p.pop, p.actives, p.skin, p.concerns, p.images,
+       p.descr, p.howto, p.ingredients, p.shape, p.tint,
+       (p.in_stock or p.preorder) as available,
+       case when p.preorder then coalesce(nullif(p.lead_time, ''), '7–14 ngày') else '' end as ship_time
+from public.products p
+where p.visible;
+revoke all on public.catalog from public;
+grant select on public.catalog to anon, authenticated;
+-- bảng products: chỉ admin đọc / sửa (policy "admin quản lý sản phẩm" ở trên)
+drop policy if exists "khách xem sản phẩm đang hiện" on public.products;
+revoke select on public.products from anon;
 
 -- =====================================================================
 -- SAU KHI CHẠY XONG: cấp quyền admin cho tài khoản của bạn
