@@ -410,7 +410,8 @@ listingPage({ url: "/khuyen-mai/", title: "Khuyến mãi mỹ phẩm", h1: "Đan
 
 /* Trang sản phẩm */
 const zaloLink = `https://zalo.me/${String(SITE.zalo || "").replace(/\D/g, "")}`;
-const withBrand = p => (norm(p.name).includes(norm(p.brand)) ? p.name : `${p.name} ${p.brand}`);
+// thêm thương hiệu vào tiêu đề nếu tên chưa có (Obagi Medical: tên có "Obagi" là đủ)
+const withBrand = p => { const n = norm(p.name), w = norm(p.brand).split(/\s+/)[0]; return n.includes(norm(p.brand)) || (w.length >= 3 && new RegExp(`\\b${w.replace(/[^a-z0-9]/g, "")}\\b`).test(n)) ? p.name : `${p.name} ${p.brand}`; };
 for (const p of P) {
   const trail = [{ name: CAT_NAME[p.cat], url: `/${p.cat}/` }, { name: p.sub, url: subUrl(p.cat, p.sub) }, { name: p.name, url: p.url }];
   const bc = crumbs([HOME, ...trail]);
